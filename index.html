@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Taakkaart Generator</title>
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🌾</text></svg>" />
+  <link rel="stylesheet" href="static/vendor/leaflet.css" />
+  <link rel="stylesheet" href="static/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <span class="logo-icon">🌾</span>
+          <h1>Taakkaart Generator</h1>
+        </div>
+        <p class="subtitle">NDVI → Variabele Dosering</p>
+      </div>
+
+      <div class="sidebar-steps">
+        <!-- STEP 1: GeoTIFF -->
+        <section class="step active" data-step="1" id="step-1">
+          <div class="step-header" data-toggle="1">
+            <div class="step-indicator"><span>1</span></div>
+            <h2>GeoTIFF Laden</h2>
+            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="step-body">
+            <p class="step-desc">Upload een WebODM multispectrale GeoTIFF (odm_orthophoto.tif)</p>
+            <label class="file-drop" id="file-drop">
+              <input type="file" id="geotiff-input" accept=".tif,.tiff" />
+              <div class="file-drop-content">
+                <svg viewBox="0 0 48 48" class="upload-icon"><path d="M24 4l-8 8h5v12h6V12h5L24 4zm-16 28v8h32v-8H8z"/></svg>
+                <span class="file-drop-text">Klik of sleep een GeoTIFF</span>
+                <span class="file-drop-hint">.tif / .tiff</span>
+              </div>
+            </label>
+            <div id="file-info" class="file-info hidden">
+              <div class="info-row"><span class="label">Bestand:</span><span id="info-filename"></span></div>
+              <div class="info-row"><span class="label">Afmetingen:</span><span id="info-dims"></span></div>
+              <div class="info-row"><span class="label">Banden:</span><span id="info-bands"></span></div>
+              <div class="info-row"><span class="label">Modus:</span><span id="info-mode"></span></div>
+              <div id="ndvi-stats-row" class="info-row hidden"><span class="label">NDVI bereik:</span><span id="info-ndvi-range"></span></div>
+              <div id="band-info-row" class="info-row hidden" style="flex-direction:column;gap:4px">
+                <span class="label">Banden:</span>
+                <table id="band-info-table" style="font-size:11px;border-collapse:collapse;width:100%"></table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- STEP 2: Band selectie -->
+        <section class="step disabled" data-step="2" id="step-2">
+          <div class="step-header" data-toggle="2">
+            <div class="step-indicator"><span>2</span></div>
+            <h2>Banden &amp; NDVI</h2>
+            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="step-body">
+            <p class="step-desc" id="band-desc">Selecteer de Red en NIR banden voor NDVI-berekening.</p>
+            <div id="band-selectors">
+              <div class="form-row">
+                <label for="red-band">Red band</label>
+                <select id="red-band"></select>
+              </div>
+              <div class="form-row">
+                <label for="nir-band">NIR band</label>
+                <select id="nir-band"></select>
+              </div>
+              <div class="form-row">
+                <label for="stretch-ndvi" style="cursor:pointer">
+                  <input type="checkbox" id="stretch-ndvi" checked />
+                  Kleurschaal aanpassen aan data
+                </label>
+              </div>
+            </div>
+            <button class="btn btn-primary" id="compute-ndvi-btn">Bereken NDVI</button>
+          </div>
+        </section>
+
+        <!-- STEP 3: Percelen selecteren -->
+        <section class="step disabled" data-step="3" id="step-3">
+          <div class="step-header" data-toggle="3">
+            <div class="step-indicator"><span>3</span></div>
+            <h2>Percelen Selecteren</h2>
+            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="step-body">
+            <p class="step-desc">Klik op een perceel om het te selecteren of te deselecteren. Meerdere percelen zijn mogelijk.</p>
+            <div id="parcel-info" class="hidden">
+              <div class="info-row"><span class="label">Geselecteerd:</span><span id="parcel-count"></span></div>
+              <div class="info-row"><span class="label">Totale oppervlakte:</span><span id="parcel-area"></span></div>
+              <div id="parcel-list" style="margin-top:6px;max-height:240px;overflow-y:auto"></div>
+              <button class="btn btn-small btn-outline" id="clear-parcels-btn" style="margin-top:8px;width:100%">Deselecteer alles</button>
+            </div>
+            <p class="hint" id="parcel-hint">Zoom verder in om BRP percelen te laden (zoom ≥ 14).</p>
+          </div>
+        </section>
+
+        <!-- STEP 4: Taakkaart configureren -->
+        <section class="step disabled" data-step="4" id="step-4">
+          <div class="step-header" data-toggle="4">
+            <div class="step-indicator"><span>4</span></div>
+            <h2>Taakkaart Instellen</h2>
+            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="step-body">
+            <div class="form-row">
+              <label for="grid-size">Gridgrootte</label>
+              <div class="range-wrap">
+                <input type="range" id="grid-size" min="3" max="30" step="1" value="10" />
+                <span class="range-value" id="grid-size-value">10 m</span>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <label for="unit-select">Eenheid</label>
+              <select id="unit-select">
+                <option value="kg/ha">kg/ha</option>
+                <option value="L/ha">L/ha</option>
+                <option value="m³/ha">m³/ha</option>
+                <option value="eenheden/ha">eenheden/ha</option>
+              </select>
+            </div>
+
+            <div class="form-row">
+              <label>Rijrichting</label>
+              <button class="btn btn-small btn-outline" id="auto-angle-btn">
+                <svg viewBox="0 0 20 20" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M4 10a6 6 0 1012 0A6 6 0 004 10zm6-6V2m0 16v-2M2 10H0m18 0h-2"/></svg>
+                Optimale rijrichting bepalen
+              </button>
+              <p class="hint" id="auto-angle-hint" style="display:none"></p>
+            </div>
+
+            <h3 class="section-title">Klassen</h3>
+            <div id="classes-container"></div>
+            <button class="btn btn-small btn-outline" id="add-class-btn">+ Klasse toevoegen</button>
+
+            <button class="btn btn-primary" id="generate-btn" style="margin-top:16px">Genereer Taakkaart</button>
+          </div>
+        </section>
+
+        <!-- STEP 5: Exporteren -->
+        <section class="step disabled" data-step="5" id="step-5">
+          <div class="step-header" data-toggle="5">
+            <div class="step-indicator"><span>5</span></div>
+            <h2>Exporteren</h2>
+            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          </div>
+          <div class="step-body">
+            <div id="export-stats"></div>
+            <div class="form-row">
+              <label for="export-name">Bestandsnaam</label>
+              <input type="text" id="export-name" value="taakkaart" placeholder="taakkaart" />
+            </div>
+            <button class="btn btn-primary" id="export-shp-btn">
+              <svg viewBox="0 0 20 20" class="btn-icon"><path d="M10 1v12m0 0l-4-4m4 4l4-4M3 15v2a2 2 0 002 2h10a2 2 0 002-2v-2"/></svg>
+              Download Shapefile (.zip)
+            </button>
+            <button class="btn btn-outline" id="export-geojson-btn" style="margin-top:8px">
+              Download GeoJSON
+            </button>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <!-- MAP -->
+    <main class="map-area">
+      <div id="map"></div>
+      <!-- Loading overlay -->
+      <div id="loading-overlay" class="hidden">
+        <div class="loading-spinner"></div>
+        <p id="loading-text">Laden...</p>
+      </div>
+      <!-- Status toast -->
+      <div id="toast" class="toast hidden"></div>
+    </main>
+  </div>
+
+  <!-- Mobile sidebar toggle (only visible on small screens) -->
+  <button id="mobile-toggle" aria-label="Paneel tonen/verbergen">
+    <svg viewBox="0 0 20 20" style="width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"><path d="M4 6h12M4 10h12M4 14h12"/></svg>
+    <span id="mobile-toggle-label">Paneel</span>
+  </button>
+
+  <!-- Vendor JS (local files) -->
+  <script src="static/vendor/leaflet.js"></script>
+  <script src="static/vendor/proj4.js"></script>
+  <script src="static/vendor/turf.min.js"></script>
+  <script src="static/vendor/geotiff.js"></script>
+  <!-- App -->
+  <script src="static/app.js"></script>
+</body>
+</html>
