@@ -329,20 +329,6 @@
     });
   });
 
-  // ---- Fix: set overflow:visible AFTER the expand animation completes ----
-  // During a CSS max-height transition the browser keeps overflow:hidden for
-  // the full duration of the animation (to clip the expanding content).
-  // The CSS rule `overflow: visible` on .step.active .step-body only takes
-  // reliable effect once the transition ends.  Without this JS listener,
-  // native <select> dropdowns can remain clipped on some browser versions.
-  $$('.step-body').forEach(function (body) {
-    body.addEventListener('transitionend', function (e) {
-      if (e.propertyName !== 'max-height') return;
-      var isOpen = body.closest('.step').classList.contains('active');
-      body.style.overflow = isOpen ? 'visible' : '';
-    });
-  });
-
   // ==========================================
   // STEP 1: FILE UPLOAD
   // ==========================================
@@ -531,6 +517,9 @@
         var ovNote2 = tw < fullW ? ' (geladen als ' + tw + '\xd7' + th + ' px)' : '';
         $('#info-mode').textContent = 'RGB kleurenkaart (Plant Health export)' + ovNote2;
         $('#band-info-row').classList.add('hidden');
+        // Populate band selectors so user can override RGB proxy detection
+        populateBandSelectors(nDataBands);
+        $('#band-desc').textContent = 'RGB kleurenkaart gedetecteerd. Klik hieronder op \u201cBereken NDVI\u201d om handmatig Red en NIR banden te kiezen als de detectie niet klopt.';
         hideLoading();
         toast('RGB Plant Health kaart gedetecteerd — wordt direct weergegeven.');
         displayNDVI();
@@ -606,6 +595,7 @@
         var ovNote = tw < fullW ? ' (geladen als ' + tw + '\xd7' + th + ' px)' : '';
         $('#info-mode').textContent = nDataBands + ' banden' + ovNote;
         populateBandSelectors(nDataBands);
+        $('#band-desc').textContent = 'Selecteer de Red en NIR banden voor NDVI-berekening.';
         hideLoading();
         toast('GeoTIFF geladen. Controleer de banden.');
         activateStep(2);
@@ -635,6 +625,9 @@
     var odmNames5 = ['Blue (B)', 'Green (G)', 'NIR', 'Red (R)', 'RedEdge (RE)'];
     var odmNames4 = ['Blue (B)', 'Green (G)', 'Red (R)', 'NIR'];
     var odmNames3 = ['Red (R)', 'Green (G)', 'Blue (B)'];
+    // RGB(A) images: use actual RGB channel order instead of ODM multispectral guess
+    var rgbNames3 = ['Red (R)', 'Green (G)', 'Blue (B)'];
+    var rgbNames4 = ['Red (R)', 'Green (G)', 'Blue (B)', 'Alpha'];
     for (var i = 0; i < n; i++) {
       var m = metas[i] || {};
       var gr = state.georaster;
@@ -643,13 +636,19 @@
         lbl = 'B' + (i + 1) + ': ' + m.name + ' (' + m.wavelength + ' nm)';
       } else if (m.name) {
         lbl = 'B' + (i + 1) + ': ' + m.name;
+      } else if (state.isRGBProxy) {
+        // RGB(A) image — label channels as R, G, B (not ODM multispectral order)
+        var rgbName = n >= 4 ? (rgbNames4[i] || 'Band ' + (i + 1))
+          : n === 3 ? (rgbNames3[i] || 'Band ' + (i + 1))
+          : 'Band ' + (i + 1);
+        lbl = 'B' + (i + 1) + ': ' + rgbName + (gr ? '  [' + gr.mins[i].toFixed(2) + '\u2013' + gr.maxs[i].toFixed(2) + ']' : '');
       } else {
         // Use ODM naming convention based on band count
         var guessName = n === 5 ? odmNames5[i]
           : n === 4 ? odmNames4[i]
           : n === 3 ? odmNames3[i]
           : 'Band ' + (i + 1);
-        lbl = 'B' + (i + 1) + ': ' + guessName + (gr ? '  [' + gr.mins[i].toFixed(2) + '–' + gr.maxs[i].toFixed(2) + ']' : '');
+        lbl = 'B' + (i + 1) + ': ' + guessName + (gr ? '  [' + gr.mins[i].toFixed(2) + '\u2013' + gr.maxs[i].toFixed(2) + ']' : '');
       }
       redBandSel.add(new Option(lbl, i));
       nirBandSel.add(new Option(lbl, i));
@@ -661,6 +660,9 @@
   computeBtn.addEventListener('click', function () {
     state.bandRed = parseInt(redBandSel.value);
     state.bandNIR = parseInt(nirBandSel.value);
+    // Keep isRGBProxy intact — for RGB proxy files the display should stay
+    // as-is (raw RGB image) while sampleNDVI uses the selected bands.
+    state.isPreCalc = false;
     if (state.bandRed === state.bandNIR) {
       toast('Red en NIR mogen niet dezelfde band zijn.', true);
       return;
@@ -745,6 +747,10 @@
     var noDataEps = (isFloat && noData !== null) ? 1e-6 : 0;
     function nd(v) { return v === null || isNaN(v) || (noData !== null && (noDataEps > 0 ? Math.abs(v - noData) < noDataEps : v === noData)); }
     var stretch = stretchCheck && stretchCheck.checked;
+    // Detect alpha channel so transparent background pixels are skipped
+    var hasAlpha = gr.numberOfRasters >= 4 && state.bandMetas.length > 0 &&
+      (gr.numberOfRasters > Math.max(bR, bN) + 1);
+    var alphaBand = hasAlpha ? gr.numberOfRasters - 1 : -1;
 
     // Render NDVI directly to a canvas and use L.imageOverlay
     var canvas = document.createElement('canvas');
@@ -760,6 +766,8 @@
     ndviGrid.fill(NaN);
     for (var row = 0; row < gr.height; row++) {
       for (var col = 0; col < gr.width; col++) {
+        // Skip transparent pixels (alpha = 0)
+        if (alphaBand >= 0 && gr.values[alphaBand][row][col] === 0) continue;
         var ndvi;
         if (isP) {
           var v = gr.values[0][row][col];
@@ -1631,8 +1639,13 @@
     var stepR = Math.max(1, Math.floor((row1 - row0) / 50));
     var stepC = Math.max(1, Math.floor((col1 - col0) / 50));
 
+    // Detect alpha channel for masking transparent background pixels
+    var sampleAlphaBand = gr.numberOfRasters >= 4 ? gr.numberOfRasters - 1 : -1;
+
     for (var r = row0; r <= row1; r += stepR) {
       for (var c = col0; c <= col1; c += stepC) {
+        // Skip transparent pixels (alpha = 0)
+        if (sampleAlphaBand >= 0 && gr.values[sampleAlphaBand][r] && gr.values[sampleAlphaBand][r][c] === 0) continue;
         var ndvi;
         if (state.isPreCalc) {
           var pv = gr.values[0][r] ? gr.values[0][r][c] : undefined;
@@ -1641,10 +1654,9 @@
         } else if (state.isRGBProxy) {
           // RGB export: proxy NDVI = (Green - Red) / (Green + Red)
           // High green = healthy vegetation → high proxy NDVI
-          var rrv = gr.values[0][r] ? gr.values[0][r][c] : undefined;
-          var ggv = gr.values[1][r] ? gr.values[1][r][c] : undefined;
-          var aav = gr.numberOfRasters >= 4 && gr.values[3][r] ? gr.values[3][r][c] : 255;
-          if (rrv === undefined || ggv === undefined || aav === 0) continue;
+          var rrv = gr.values[state.bandRed][r] ? gr.values[state.bandRed][r][c] : undefined;
+          var ggv = gr.values[state.bandNIR][r] ? gr.values[state.bandNIR][r][c] : undefined;
+          if (rrv === undefined || ggv === undefined) continue;
           if ((rrv + ggv) === 0) continue;
           ndvi = (ggv - rrv) / (ggv + rrv);
         } else {

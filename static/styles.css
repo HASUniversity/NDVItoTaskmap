@@ -171,15 +171,24 @@ body {
 
 .step-body {
   max-height: 0;
-  overflow: hidden;
-  transition: max-height .35s ease, padding .35s ease;
+  /* overflow:hidden was removed here because during a CSS max-height transition
+     browsers enforce overflow:hidden for the full animation duration, which makes
+     <select> dropdowns and other interactive elements inside unresponsive.
+     Instead we use opacity+pointer-events to hide/disable the collapsed body. */
+  overflow: visible;
+  opacity: 0;
+  pointer-events: none;
+  transition: max-height .35s ease, opacity .2s ease, padding .35s ease;
   padding: 0 20px;
 }
 
 .step.active .step-body {
-  max-height: 2400px; /* large enough for any content */
+  max-height: 2400px;
+  opacity: 1;
+  /* pointer-events changes instantly (non-animatable) so selects are
+     interactive immediately on open, without waiting for the animation. */
+  pointer-events: auto;
   padding: 0 20px 20px;
-  overflow: visible; /* allow native <select> dropdowns to render above parent */
 }
 
 .step.disabled .step-body {
