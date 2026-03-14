@@ -94,12 +94,40 @@
       'https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
       { attribution: 'PDOK', maxZoom: 19 }
     ),
+    'Esri Satelliet': L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'Esri, Maxar, Earthstar Geographics', maxZoom: 19 }
+    ),
     'OpenStreetMap': L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       { attribution: '&copy; OpenStreetMap', maxZoom: 19 }
     ),
   };
-  basemaps['PDOK Luchtfoto'].addTo(map);
+  basemaps['Esri Satelliet'].addTo(map);
+
+  // Netherlands border outline — fetched from PDOK Bestuurlijke Gebieden WFS
+  (function addNLBorder() {
+    var url = 'https://service.pdok.nl/kadaster/bestuurlijkegebieden/wfs/v1_0?' +
+      'service=WFS&version=2.0.0&request=GetFeature' +
+      '&typeName=bestuurlijkegebieden:Landgebied' +
+      '&outputFormat=json&srsName=EPSG:4326&count=10';
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.features || data.features.length === 0) return;
+        L.geoJSON(data, {
+          style: {
+            color: '#FF6600',
+            weight: 2,
+            opacity: 0.7,
+            dashArray: '6,4',
+            fillOpacity: 0,
+            interactive: false
+          }
+        }).addTo(map);
+      })
+      .catch(function () { /* silently ignore if PDOK is unreachable */ });
+  })();
 
   const ndviOverlay = L.layerGroup().addTo(map);
   const selectionOverlay = L.layerGroup().addTo(map);
@@ -625,9 +653,9 @@
     var odmNames5 = ['Blue (B)', 'Green (G)', 'NIR', 'Red (R)', 'RedEdge (RE)'];
     var odmNames4 = ['Blue (B)', 'Green (G)', 'Red (R)', 'NIR'];
     var odmNames3 = ['Red (R)', 'Green (G)', 'Blue (B)'];
-    // RGB(A) images: use actual RGB channel order instead of ODM multispectral guess
-    var rgbNames3 = ['Red (R)', 'Green (G)', 'Blue (B)'];
-    var rgbNames4 = ['Red (R)', 'Green (G)', 'Blue (B)', 'Alpha'];
+    // RGB(A) images: label the auto-detected NIR band appropriately
+    var rgbNames3 = ['Red (R)', 'NIR (G-kanaal)', 'Blue (B)'];
+    var rgbNames4 = ['Red (R)', 'NIR (G-kanaal)', 'Blue (B)', 'Alpha'];
     for (var i = 0; i < n; i++) {
       var m = metas[i] || {};
       var gr = state.georaster;
@@ -1297,15 +1325,48 @@
   // ==========================================
   // STEP 4: TASK MAP CONFIGURATION
   // ==========================================
+
+  // Debounced live regeneration of the task map
+  var _liveTimer = null;
+  function liveRegenerate() {
+    if (!state.selectedParcels || state.selectedParcels.length === 0) return;
+    if (state.currentStep < 4) return;
+    clearTimeout(_liveTimer);
+    _liveTimer = setTimeout(function () {
+      try {
+        generateTaskMap();
+        renderExportStats();
+      } catch (e) { console.warn('Live regenerate failed:', e); }
+    }, 300);
+  }
+
   gridSlider.addEventListener('input', function () {
     state.gridSize = parseInt(gridSlider.value);
     gridValue.textContent = state.gridSize + ' m';
+    liveRegenerate();
   });
 
   if (gridAngleSlider) {
     gridAngleSlider.addEventListener('input', function () {
       state.gridAngle = parseInt(gridAngleSlider.value);
       gridAngleValue.textContent = state.gridAngle + '°';
+      liveRegenerate();
+    });
+  }
+
+  // Noord-Zuid (klassiek) button — reset angle to 0
+  var northSouthBtn = $('#north-south-btn');
+  if (northSouthBtn) {
+    northSouthBtn.addEventListener('click', function () {
+      state.gridAngle = 0;
+      if (gridAngleSlider) gridAngleSlider.value = 0;
+      if (gridAngleValue) gridAngleValue.textContent = '0°';
+      if (autoAngleHint) {
+        autoAngleHint.textContent = 'Noord-Zuid (klassiek fishnet)';
+        autoAngleHint.style.display = '';
+      }
+      toast('Rijrichting: Noord-Zuid (0°)');
+      liveRegenerate();
     });
   }
 
@@ -1317,16 +1378,20 @@
       }
       var angle = computeOptimalGridAngle(state.selectedParcels);
       state.gridAngle = angle;
+      if (gridAngleSlider) gridAngleSlider.value = angle;
+      if (gridAngleValue) gridAngleValue.textContent = angle + '°';
       if (autoAngleHint) {
         autoAngleHint.textContent = 'Rijrichting: ' + angle + '° (langste zijde perceel)';
         autoAngleHint.style.display = '';
       }
       toast('Rijrichting ingesteld op ' + angle + '°');
+      liveRegenerate();
     });
   }
 
   unitSelect.addEventListener('change', function () {
     state.unit = unitSelect.value;
+    liveRegenerate();
   });
 
   function renderClasses() {
@@ -1360,6 +1425,7 @@
         } else if (field) {
           state.classes[i][field] = parseFloat(inp.value);
         }
+        liveRegenerate();
       });
     });
 
@@ -1367,6 +1433,7 @@
       btn.addEventListener('click', function () {
         state.classes.splice(parseInt(btn.dataset.i), 1);
         renderClasses();
+        liveRegenerate();
       });
     });
   }

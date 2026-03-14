@@ -128,10 +128,19 @@
 
             <div class="form-row">
               <label>Rijrichting</label>
-              <button class="btn btn-small btn-outline" id="auto-angle-btn">
-                <svg viewBox="0 0 20 20" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M4 10a6 6 0 1012 0A6 6 0 004 10zm6-6V2m0 16v-2M2 10H0m18 0h-2"/></svg>
-                Optimale rijrichting bepalen
-              </button>
+              <div class="range-wrap">
+                <input type="range" id="grid-angle" min="-90" max="90" step="1" value="0" />
+                <span class="range-value" id="grid-angle-value">0°</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:6px">
+                <button class="btn btn-small btn-outline" id="north-south-btn" style="flex:1">
+                  ↕ Noord-Zuid (klassiek)
+                </button>
+                <button class="btn btn-small btn-outline" id="auto-angle-btn" style="flex:1">
+                  <svg viewBox="0 0 20 20" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M4 10a6 6 0 1012 0A6 6 0 004 10zm6-6V2m0 16v-2M2 10H0m18 0h-2"/></svg>
+                  Optimale rijrichting
+                </button>
+              </div>
               <p class="hint" id="auto-angle-hint" style="display:none"></p>
             </div>
 
