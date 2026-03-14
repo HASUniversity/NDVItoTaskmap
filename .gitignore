@@ -1,0 +1,11 @@
+# GeoTIFF raster files (often large, not for version control)
+*.tif
+*.tiff
+*.TIF
+*.TIFF
+
+# Common OS / editor artefacts
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/

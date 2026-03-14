@@ -52,6 +52,7 @@
     currentStep: 1,
     isPreCalc: false,
     brpLoading: false,
+    ndviHistogramData: null,
   };
 
   // ==========================================
@@ -326,6 +327,7 @@
       else if (s === n) el.classList.add('active');
       else el.classList.add('disabled');
     });
+    if (n === 4) setTimeout(drawNDVIHistogram, 400);
   }
 
   function openStep(n) {
@@ -347,6 +349,7 @@
         stepEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }, 60);
     }
+    if (n === 4) setTimeout(drawNDVIHistogram, 400);
   }
 
   // Step header clicks
@@ -746,6 +749,10 @@
       var imgData = ctx.createImageData(gr.width, gr.height);
       var px = imgData.data;
       var hasAlpha = gr.numberOfRasters >= 4;
+
+      // Compute proxy-NDVI histogram from RGB values: pNDVI = (G-R)/(G+R)
+      var HIST_BINS_P = 100, histBinMinP = -0.2, histBinMaxP = 1.0;
+      var histCountsP = new Float32Array(HIST_BINS_P);
       for (var row = 0; row < gr.height; row++) {
         for (var col = 0; col < gr.width; col++) {
           var idx = (row * gr.width + col) << 2;
@@ -753,13 +760,21 @@
           var gv = gr.values[1][row][col];
           var bv = gr.values[2][row][col];
           var av = hasAlpha ? gr.values[3][row][col] : 255;
-          if (av === 0) continue; // transparent pixel
+          if (av === 0) continue;
           px[idx]     = rv;
           px[idx + 1] = gv;
           px[idx + 2] = bv;
-          px[idx + 3] = Math.round(av * 0.85); // slight transparency
+          px[idx + 3] = Math.round(av * 0.85);
+          var sum = gv + rv;
+          if (sum > 0) {
+            var pndvi = (gv - rv) / sum;
+            var bip = Math.floor((pndvi - histBinMinP) / (histBinMaxP - histBinMinP) * HIST_BINS_P);
+            histCountsP[Math.max(0, Math.min(HIST_BINS_P - 1, bip))]++;
+          }
         }
       }
+      state.ndviHistogramData = { counts: histCountsP, min: histBinMinP, max: histBinMaxP };
+
       ctx.putImageData(imgData, 0, 0);
       state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
       ndviOverlay.addLayer(state.ndviLayer);
@@ -815,6 +830,18 @@
       }
     }
 
+    // Compute NDVI histogram (100 bins, -0.2..1.0) for step-4 display
+    var HIST_BINS = 100, histBinMin = -0.2, histBinMax = 1.0;
+    var histCounts = new Float32Array(HIST_BINS);
+    for (var hi = 0; hi < ndviGrid.length; hi++) {
+      var hv = ndviGrid[hi];
+      if (!isNaN(hv)) {
+        var bi = Math.floor((hv - histBinMin) / (histBinMax - histBinMin) * HIST_BINS);
+        histCounts[Math.max(0, Math.min(HIST_BINS - 1, bi))]++;
+      }
+    }
+    state.ndviHistogramData = { counts: histCounts, min: histBinMin, max: histBinMax };
+
     // Determine color scale range
     var scaleMin = -0.2, scaleMax = 1.0;
     if (stretch && ndviCount > 0) {
@@ -868,6 +895,81 @@
 
   function zoomToGeoTIFF() {
     map.fitBounds(getGeoBounds(), { padding: [30, 30] });
+  }
+
+  // ==========================================
+  // NDVI HISTOGRAM
+  // ==========================================
+  function drawNDVIHistogram() {
+    var wrap = document.getElementById('ndvi-histogram-wrap');
+    var canvas = document.getElementById('ndvi-histogram');
+    if (!canvas) return;
+    var data = state.ndviHistogramData;
+    if (!data) { if (wrap) wrap.style.display = 'none'; return; }
+    if (wrap) wrap.style.display = '';
+    var dpr = window.devicePixelRatio || 1;
+    var cssW = canvas.offsetWidth || 300;
+    canvas.width  = cssW * dpr;
+    canvas.height = 60 * dpr;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    var w = cssW, h = 60;
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, w, h);
+    var counts = data.counts, n = counts.length;
+    var maxCnt = 0;
+    for (var i = 0; i < n; i++) if (counts[i] > maxCnt) maxCnt = counts[i];
+    if (!maxCnt) return;
+    var bw = w / n;
+    for (var i = 0; i < n; i++) {
+      if (!counts[i]) continue;
+      var barH = (counts[i] / maxCnt) * (h - 6);
+      var v = data.min + (i + 0.5) / n * (data.max - data.min);
+      var rgb = ndviToRGB(v, data.min, data.max);
+      ctx.fillStyle = 'rgb(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ')';
+      ctx.fillRect(i * bw, h - barH, bw + 0.5, barH);
+    }
+    // Draw class boundary lines + rate labels
+    state.classes.forEach(function (cls, ci) {
+      var x0 = (cls.min - data.min) / (data.max - data.min) * w;
+      var x1 = (cls.max - data.min) / (data.max - data.min) * w;
+      ctx.globalAlpha = 0.75;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      if (x0 > 0 && x0 < w) { ctx.beginPath(); ctx.moveTo(x0, 0); ctx.lineTo(x0, h); ctx.stroke(); }
+      if (x1 > 0 && x1 < w) { ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, h); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+      if (x1 - x0 > 18) {
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(cls.rate, Math.min(Math.max((x0 + x1) / 2, 12), w - 12), 10);
+      }
+    });
+  }
+
+  function autoClassifyFromData() {
+    var data = state.ndviHistogramData;
+    if (!data) { toast('Laad eerst een NDVI kaart.', true); return; }
+    var counts = data.counts, n = counts.length;
+    var total = 0;
+    for (var i = 0; i < n; i++) total += counts[i];
+    if (!total) return;
+    var numCls = state.classes.length;
+    var target = total / numCls;
+    var bounds = [data.min];
+    var cum = 0;
+    for (var i = 0; i < n && bounds.length < numCls; i++) {
+      cum += counts[i];
+      if (cum >= target * bounds.length)
+        bounds.push(Math.round((data.min + (i + 1) / n * (data.max - data.min)) * 1000) / 1000);
+    }
+    while (bounds.length < numCls) bounds.push(data.max);
+    bounds.push(data.max);
+    state.classes.forEach(function (cls, i) { cls.min = bounds[i]; cls.max = bounds[i + 1]; });
+    renderClasses();
+    liveRegenerate();
+    toast('Klassen ingesteld op gelijke NDVI-oppervlakte (' + numCls + ' klassen).');
   }
 
   // ==========================================
@@ -1436,6 +1538,7 @@
         liveRegenerate();
       });
     });
+    setTimeout(drawNDVIHistogram, 0);
   }
 
   addClassBtn.addEventListener('click', function () {
@@ -1449,6 +1552,9 @@
     });
     renderClasses();
   });
+
+  var autoClassifyBtn = $('#auto-classify-btn');
+  if (autoClassifyBtn) autoClassifyBtn.addEventListener('click', autoClassifyFromData);
 
   // ==========================================
   // STEP 4b: GENERATE TASK MAP
@@ -1760,6 +1866,8 @@
     var features = state.taskMapFC.features;
     var totalArea = 0;
     var classCounts = {};
+    var totalProduct = 0;
+    var unitShort = state.unit.split('/')[0];
 
     features.forEach(function (f) {
       var a = turf.area(f);
@@ -1777,14 +1885,20 @@
 
     Object.keys(classCounts).forEach(function (k) {
       var c = classCounts[k];
+      var clsProd = (c.area / 10000) * c.rate;
+      totalProduct += clsProd;
       html +=
         '<div class="stat-class">' +
         '<span class="stat-class-color" style="background:' + escapeHtml(c.color) + '"></span>' +
         '<span style="flex:1">' + escapeHtml(k) + '</span>' +
-        '<span>' + Number(c.count) + ' cellen</span>' +
-        '<span style="margin-left:8px;font-weight:600">' + Number(c.rate) + ' ' + escapeHtml(state.unit) + '</span>' +
+        '<span>' + (c.area / 10000).toFixed(1) + ' ha</span>' +
+        '<span style="margin-left:6px;font-weight:600">' + Math.round(clsProd) + ' ' + escapeHtml(unitShort) + '</span>' +
         '</div>';
     });
+
+    html += '<hr style="margin:8px 0;border:none;border-top:1px solid var(--border)">' +
+      '<div class="stat-row"><span class="stat-label">Totaal product</span>' +
+      '<span class="stat-value">' + Math.round(totalProduct) + ' ' + escapeHtml(unitShort) + '</span></div>';
 
     $('#export-stats').innerHTML = html;
   }
@@ -1839,6 +1953,42 @@
     toast('GeoJSON download gestart.');
   });
 
+  var exportCsvBtn = $('#export-csv-btn');
+  if (exportCsvBtn) exportCsvBtn.addEventListener('click', function () {
+    if (!state.taskMapFC) { toast('Genereer eerst een taakkaart.', true); return; }
+    var name = exportNameInput.value || 'taakkaart';
+    var csv = buildCSV(state.taskMapFC);
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href = url; a.download = name + '.csv';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast('CSV download gestart.');
+  });
+
+  var exportIsoxmlBtn = $('#export-isoxml-btn');
+  if (exportIsoxmlBtn) exportIsoxmlBtn.addEventListener('click', function () {
+    if (!state.taskMapFC) { toast('Genereer eerst een taakkaart.', true); return; }
+    showLoading('ISOXML bouwen...');
+    setTimeout(function () {
+      try {
+        var name = exportNameInput.value || 'taakkaart';
+        var blob = buildISOXMLZip(state.taskMapFC, name, state.unit);
+        hideLoading();
+        if (!blob) return;
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a'); a.href = url; a.download = name + '_TASKDATA.zip';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        toast('ISOXML download gestart.');
+      } catch (err) {
+        hideLoading();
+        console.error(err);
+        toast('ISOXML fout: ' + err.message, true);
+      }
+    }, 50);
+  });
+
   // ==========================================
   // INIT
   // ==========================================
@@ -1881,6 +2031,117 @@
     }
     update();
   })();
+
+  // ==========================================
+  // CSV / ISOXML EXPORT BUILDERS
+  // ==========================================
+  function escapeXml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  }
+
+  function buildCSV(geojson) {
+    var rows = ['\uFEFFcel_id,ndvi,klasse,dosering,eenheid,oppervlakte_m2'];
+    geojson.features.forEach(function (f, i) {
+      var p = f.properties;
+      var area = Math.round(turf.area(f));
+      rows.push([
+        i + 1, p.ndvi,
+        '"' + String(p.klasse || '').replace(/"/g, '""') + '"',
+        p.dosering,
+        '"' + String(p.eenheid || '').replace(/"/g, '""') + '"',
+        area
+      ].join(','));
+    });
+    return rows.join('\r\n');
+  }
+
+  // Point-in-polygon for ISOXML rasterisation (ray casting)
+  function _pip(lon, lat, feature) {
+    var coords = feature.geometry.type === 'Polygon'
+      ? [feature.geometry.coordinates] : feature.geometry.coordinates;
+    for (var p = 0; p < coords.length; p++) {
+      var ring = coords[p][0], inside = false;
+      for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+        if (((yi > lat) !== (yj > lat)) && (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi))
+          inside = !inside;
+      }
+      if (inside) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Builds an ISO 11783-10 (ISOXML) TaskData archive compatible with
+   * ISOBUS task controllers (John Deere, AGCO, CNH, Fendt, Claas, Topcon, Trimble).
+   * Generates TASKDATA/TASKDATA.XML + TASKDATA/GRD00001.BIN (grid type 1).
+   * DDI 0x0007 = mass/area setpoint (mg/m²); DDI 0x0001 = volume/area (µL/m²).
+   * 1 kg/ha = 100 mg/m²;  1 L/ha = 100 µL/m².
+   */
+  function buildISOXMLZip(geojson, name, unit) {
+    var enc = new TextEncoder();
+    var rateMap = {}, tznList = [], code = 1;
+    geojson.features.forEach(function (f) {
+      var key = String(f.properties.dosering) + '|' + f.properties.klasse;
+      if (!rateMap[key]) {
+        rateMap[key] = code++;
+        tznList.push({ code: rateMap[key], rate: f.properties.dosering, label: f.properties.klasse });
+      }
+    });
+    var allBbox = turf.bbox(geojson);
+    var lonMin = allBbox[0], latMin = allBbox[1], lonMax = allBbox[2], latMax = allBbox[3];
+    var avgLat = (latMin + latMax) / 2;
+    var cellLatDeg = state.gridSize / 111320;
+    var cellLonDeg = state.gridSize / (111320 * Math.cos(avgLat * Math.PI / 180));
+    lonMin -= cellLonDeg * 0.5; latMin -= cellLatDeg * 0.5;
+    lonMax += cellLonDeg * 0.5; latMax += cellLatDeg * 0.5;
+    var numCols = Math.max(1, Math.ceil((lonMax - lonMin) / cellLonDeg));
+    var numRows = Math.max(1, Math.ceil((latMax - latMin) / cellLatDeg));
+    if (numCols * numRows > 500000) {
+      toast('Grid te groot voor ISOXML — vergroot de gridgrootte.', true); return null;
+    }
+    var gridBin = new Uint8Array(numRows * numCols);
+    geojson.features.forEach(function (f) {
+      var key = String(f.properties.dosering) + '|' + f.properties.klasse;
+      var tznCode = rateMap[key];
+      var fb = turf.bbox(f);
+      var c0 = Math.max(0, Math.floor((fb[0] - lonMin) / cellLonDeg));
+      var c1 = Math.min(numCols - 1, Math.ceil((fb[2] - lonMin) / cellLonDeg));
+      var r0 = Math.max(0, Math.floor((latMax - fb[3]) / cellLatDeg));
+      var r1 = Math.min(numRows - 1, Math.ceil((latMax - fb[1]) / cellLatDeg));
+      for (var r = r0; r <= r1; r++) {
+        for (var c = c0; c <= c1; c++) {
+          if (gridBin[r * numCols + c]) continue;
+          if (_pip(lonMin + (c + 0.5) * cellLonDeg, latMax - (r + 0.5) * cellLatDeg, f))
+            gridBin[r * numCols + c] = tznCode;
+        }
+      }
+    });
+    var ddi = (unit === 'L/ha' || unit === 'm\u00b3/ha') ? '0001' : '0007';
+    var tznXML = tznList.map(function (t) {
+      return '    <TZN A="' + t.code + '" B="' + escapeXml(t.label) + '">\n' +
+        '      <PDV A="' + ddi + '" B="' + Math.round(t.rate * 100) + '" C="PDT1"/>\n    </TZN>';
+    }).join('\n');
+    var xmlStr =
+      '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<ISO11783_TaskData VersionMajor="4" VersionMinor="0"\n' +
+      '  ManagementSoftwareManufacturer="DiLab"\n' +
+      '  ManagementSoftwareName="NDVI Taakkaart Generator"\n' +
+      '  DataTransferOrigin="1">\n' +
+      '  <PDT A="PDT1" B="' + escapeXml(name) + '" C="1"/>\n' +
+      '  <TSK A="TSK1" B="' + escapeXml(name) + '" G="1">\n' +
+      '    <TZN A="0" B="Buiten perceel"/>\n' +
+      tznXML + '\n' +
+      '    <GRD A="' + latMin.toFixed(8) + '" B="' + lonMin.toFixed(8) + '"\n' +
+      '         C="' + cellLatDeg.toFixed(8) + '" D="' + cellLonDeg.toFixed(8) + '"\n' +
+      '         E="' + numCols + '" F="' + numRows + '" G="GRD00001" I="0"/>\n' +
+      '  </TSK>\n</ISO11783_TaskData>\n';
+    return _buildZipBlob([
+      { name: 'TASKDATA/TASKDATA.XML', data: enc.encode(xmlStr) },
+      { name: 'TASKDATA/GRD00001.BIN', data: gridBin },
+    ]);
+  }
 
   // ==========================================
   // SHAPEFILE + ZIP WRITER  (pure JS)

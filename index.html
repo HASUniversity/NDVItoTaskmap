@@ -144,7 +144,14 @@
               <p class="hint" id="auto-angle-hint" style="display:none"></p>
             </div>
 
-            <h3 class="section-title">Klassen</h3>
+            <div id="ndvi-histogram-wrap" style="display:none;margin-bottom:12px">
+              <div style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">NDVI verdeling</div>
+              <canvas id="ndvi-histogram" height="60" style="width:100%;display:block;border-radius:4px;background:#0d1117"></canvas>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <h3 class="section-title" style="margin:0">Klassen</h3>
+              <button class="btn-classify-hint" id="auto-classify-btn">auto-classificeer</button>
+            </div>
             <div id="classes-container"></div>
             <button class="btn btn-small btn-outline" id="add-class-btn">+ Klasse toevoegen</button>
 
@@ -165,13 +172,21 @@
               <label for="export-name">Bestandsnaam</label>
               <input type="text" id="export-name" value="taakkaart" placeholder="taakkaart" />
             </div>
-            <button class="btn btn-primary" id="export-shp-btn">
-              <svg viewBox="0 0 20 20" class="btn-icon"><path d="M10 1v12m0 0l-4-4m4 4l4-4M3 15v2a2 2 0 002 2h10a2 2 0 002-2v-2"/></svg>
-              Download Shapefile (.zip)
-            </button>
-            <button class="btn btn-outline" id="export-geojson-btn" style="margin-top:8px">
-              Download GeoJSON
-            </button>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+              <button class="btn btn-primary" id="export-shp-btn">
+                <svg viewBox="0 0 20 20" class="btn-icon"><path d="M10 1v12m0 0l-4-4m4 4l4-4M3 15v2a2 2 0 002 2h10a2 2 0 002-2v-2"/></svg>
+                Shapefile — ArcGIS, QGIS, John Deere Ops
+              </button>
+              <button class="btn btn-outline" id="export-isoxml-btn">
+                🚜 ISOXML TaskData — ISOBUS Task Controller
+              </button>
+              <button class="btn btn-outline" id="export-geojson-btn">
+                GeoJSON — Web GIS, Mapbox
+              </button>
+              <button class="btn btn-outline" id="export-csv-btn">
+                CSV — Excel, FMIS, Agromanager
+              </button>
+            </div>
           </div>
         </section>
       </div>
