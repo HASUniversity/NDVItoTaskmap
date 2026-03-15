@@ -133,29 +133,119 @@
   const ndviOverlay = L.layerGroup().addTo(map);
   const selectionOverlay = L.layerGroup().addTo(map);
   const brpOverlay = L.layerGroup().addTo(map);
-  const gridOverlay = L.layerGroup().addTo(map);
+  const gridOverlay = L.layerGroup(); // added to map on first generateTaskMap()
 
-  L.control.layers(basemaps, {
-    'NDVI': ndviOverlay,
-    'BRP Percelen': brpOverlay,
-    'Selectie': selectionOverlay,
-    'Taakkaart': gridOverlay,
-  }, { position: 'topright', collapsed: true }).addTo(map);
+  // ==========================================
+  // UNIFIED LAYER CONTROL
+  // ==========================================
+  var _activeBasemap = 'Esri Satelliet';
 
-  // NDVI Legend — labels updated dynamically when NDVI is displayed
-  const legend = L.control({ position: 'bottomright' });
-  legend.onAdd = function () {
-    const div = L.DomUtil.create('div', 'ndvi-legend');
-    div.innerHTML =
-      '<h4>NDVI</h4>' +
-      '<div class="legend-gradient"></div>' +
-      '<div class="legend-labels" id="legend-labels"><span>laag</span><span></span><span>hoog</span></div>' +
-      '<div id="legend-parcel" style="display:none">' +
-        '<div class="legend-parcel-sep"></div>' +
-        '<div id="legend-parcel-content"></div>' +
-      '</div>';
-    return div;
-  };
+  var layerControl = L.Control.extend({
+    options: { position: 'bottomright' },
+    onAdd: function () {
+      var div = L.DomUtil.create('div', 'ulc-wrap');
+      L.DomEvent.disableClickPropagation(div);
+      L.DomEvent.disableScrollPropagation(div);
+
+      // Toggle button (always visible)
+      var toggleBtn = L.DomUtil.create('button', 'ulc-toggle', div);
+      toggleBtn.title = 'Lagen';
+      toggleBtn.innerHTML =
+        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<rect x="2" y="3" width="16" height="3" rx="1"/>' +
+        '<rect x="2" y="9" width="16" height="3" rx="1"/>' +
+        '<rect x="2" y="15" width="16" height="3" rx="1"/>' +
+        '</svg>';
+
+      // Panel
+      var panel = L.DomUtil.create('div', 'ulc-panel hidden', div);
+      panel.innerHTML =
+        '<div class="ulc-section-title">Achtergrond</div>' +
+        '<label class="ulc-radio"><input type="radio" name="basemap" value="Esri Satelliet" checked> Esri Satelliet</label>' +
+        '<label class="ulc-radio"><input type="radio" name="basemap" value="PDOK Luchtfoto"> PDOK Luchtfoto</label>' +
+        '<label class="ulc-radio"><input type="radio" name="basemap" value="OpenStreetMap"> OpenStreetMap</label>' +
+        '<div class="ulc-sep"></div>' +
+        '<div class="ulc-section-title">Lagen</div>' +
+        '<label class="ulc-check"><input type="checkbox" data-layer="ndvi" checked> \uD83C\uDF3F NDVI</label>' +
+        '<label class="ulc-check"><input type="checkbox" data-layer="taakkaart"> \uD83D\uDCCB Taakkaart</label>' +
+        '<label class="ulc-check"><input type="checkbox" data-layer="percelen" checked> \uD83D\uDFE1 Percelen</label>' +
+        '<label class="ulc-check"><input type="checkbox" data-layer="selectie" checked> \u2705 Selectie</label>' +
+        '<div class="ulc-sep ulc-ndvi-section" style="display:none"></div>' +
+        '<div class="ulc-section-title ulc-ndvi-section" style="display:none">NDVI schaal</div>' +
+        '<div class="ulc-ndvi-section" style="display:none">' +
+          '<div class="legend-gradient"></div>' +
+          '<div class="legend-labels" id="legend-labels"><span>laag</span><span></span><span>hoog</span></div>' +
+        '</div>' +
+        '<div id="legend-parcel" style="display:none">' +
+          '<div class="legend-parcel-sep"></div>' +
+          '<div id="legend-parcel-content"></div>' +
+        '</div>';
+
+      toggleBtn.addEventListener('click', function () {
+        panel.classList.toggle('hidden');
+        toggleBtn.classList.toggle('active');
+      });
+
+      // Basemap radios
+      panel.querySelectorAll('input[name="basemap"]').forEach(function (radio) {
+        radio.addEventListener('change', function () {
+          if (!radio.checked) return;
+          basemaps[_activeBasemap].remove();
+          _activeBasemap = radio.value;
+          basemaps[_activeBasemap].addTo(map);
+        });
+      });
+
+      // Overlay checkboxes
+      var overlayMap = {};
+      panel.addEventListener('change', function (e) {
+        var cb = e.target;
+        if (!cb.dataset.layer) return;
+        var key = cb.dataset.layer;
+        var overlay = overlayMap[key];
+        if (!overlay) return;
+        if (cb.checked) map.addLayer(overlay); else map.removeLayer(overlay);
+        // Percelen and selectie are visually linked – mirror the toggle
+        if (key === 'percelen') {
+          var selCb = panel.querySelector('input[data-layer="selectie"]');
+          if (selCb && selCb.checked !== cb.checked) {
+            selCb.checked = cb.checked;
+            if (overlayMap.selectie) {
+              if (cb.checked) map.addLayer(overlayMap.selectie);
+              else map.removeLayer(overlayMap.selectie);
+            }
+          }
+        }
+      });
+
+      div._overlayMap = overlayMap;
+      return div;
+    }
+  });
+
+  var _layerControlInstance = new layerControl().addTo(map);
+
+  // Wire overlay references into the control once all layerGroups exist
+  (function () {
+    var om = _layerControlInstance.getContainer()._overlayMap;
+    if (om) {
+      om.ndvi       = ndviOverlay;
+      om.taakkaart  = gridOverlay;
+      om.percelen   = brpOverlay;
+      om.selectie   = selectionOverlay;
+    }
+  })();
+
+  // NDVI Legend is now embedded in the unified layer control panel.
+  // Keep a stub `legend` object with addTo() so existing calls don't break.
+  const legend = { addTo: function () { return this; } };
+
+  // Show NDVI scale section in the layer panel when NDVI is loaded
+  function showLegendInPanel() {
+    document.querySelectorAll('.ulc-ndvi-section').forEach(function (el) {
+      el.style.display = '';
+    });
+  }
 
   function updateLegendCrop(feature, byYear) {
     var container = document.getElementById('legend-parcel');
@@ -779,6 +869,7 @@
       state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
       ndviOverlay.addLayer(state.ndviLayer);
       legend.addTo(map);
+      showLegendInPanel();
       return;
     }
 
@@ -883,6 +974,7 @@
     state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
     ndviOverlay.addLayer(state.ndviLayer);
     legend.addTo(map);
+    showLegendInPanel();
     // Update legend labels with actual scale range
     setTimeout(function () {
       var ll = document.getElementById('legend-labels');
@@ -1761,6 +1853,11 @@
         );
       }
     }).addTo(gridOverlay);
+
+    // Ensure the taakkaart layer is visible and its checkbox reflects that
+    if (!map.hasLayer(gridOverlay)) map.addLayer(gridOverlay);
+    var taakkaartCb = document.querySelector('.ulc-panel input[data-layer="taakkaart"]');
+    if (taakkaartCb) taakkaartCb.checked = true;
   }
 
   /**

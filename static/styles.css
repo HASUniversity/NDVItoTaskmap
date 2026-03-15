@@ -641,24 +641,7 @@ input[type="range"]::-webkit-slider-thumb {
   display: none;
 }
 
-/* ---------- NDVI Legend ---------- */
-.ndvi-legend {
-  background: white;
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  font-size: 11px;
-}
-
-.ndvi-legend h4 {
-  margin-bottom: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  color: var(--text-secondary);
-}
-
+/* ---------- NDVI scale (inside layer panel) ---------- */
 .legend-gradient {
   width: 140px;
   height: 14px;
@@ -813,6 +796,94 @@ input[type="range"]::-webkit-slider-thumb {
 .leaflet-control-layers {
   border-radius: var(--radius-sm) !important;
   box-shadow: var(--shadow) !important;
+}
+
+/* ---------- Unified layer control ---------- */
+.ulc-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.ulc-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  color: var(--text-secondary);
+  transition: color 0.15s, background 0.15s;
+  padding: 0;
+}
+.ulc-toggle svg {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+.ulc-toggle.active,
+.ulc-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg);
+}
+
+.ulc-panel {
+  position: absolute;
+  bottom: 42px;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  z-index: 1000;
+}
+.ulc-panel.hidden {
+  display: none;
+}
+
+.ulc-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  margin-bottom: 1px;
+}
+
+.ulc-sep {
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+}
+
+.ulc-radio,
+.ulc-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 2px 0;
+  user-select: none;
+}
+.ulc-radio input,
+.ulc-check input {
+  cursor: pointer;
+  accent-color: var(--primary-light);
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
 }
 
 /* ---------- Mobile toggle button (hidden on desktop) ---------- */
