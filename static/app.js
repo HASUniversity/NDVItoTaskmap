@@ -2113,11 +2113,23 @@
       for (var r = r0; r <= r1; r++) {
         for (var c = c0; c <= c1; c++) {
           if (gridBin[r * numCols + c]) continue;
+          // row 0 = northernmost during fill (will be flipped below)
           if (_pip(lonMin + (c + 0.5) * cellLonDeg, latMax - (r + 0.5) * cellLatDeg, f))
             gridBin[r * numCols + c] = tznCode;
         }
       }
     });
+
+    // ISO 11783-10 §B.8: row 0 = MinimumNorthPosition (southernmost row).
+    // Our fill uses row 0 = northernmost, so flip vertically.
+    var gridBinFinal = new Uint8Array(numRows * numCols);
+    for (var r = 0; r < numRows; r++) {
+      for (var c = 0; c < numCols; c++) {
+        gridBinFinal[(numRows - 1 - r) * numCols + c] = gridBin[r * numCols + c];
+      }
+    }
+
+    var fileLength = numRows * numCols; // bytes for GridType 1
     var ddi = (unit === 'L/ha' || unit === 'm\u00b3/ha') ? '0001' : '0007';
     var tznXML = tznList.map(function (t) {
       return '    <TZN A="' + t.code + '" B="' + escapeXml(t.label) + '">\n' +
@@ -2131,15 +2143,18 @@
       '  DataTransferOrigin="1">\n' +
       '  <PDT A="PDT1" B="' + escapeXml(name) + '" C="1"/>\n' +
       '  <TSK A="TSK1" B="' + escapeXml(name) + '" G="1">\n' +
-      '    <TZN A="0" B="Buiten perceel"/>\n' +
+      '    <TZN A="0" B="Outside field"/>\n' +
       tznXML + '\n' +
+      // GRD/@I=1 = GridType 1 (1 byte/cell = treatment zone code), per ISO 11783-10 Table B.3
+      // GRD/@H = Filelength in bytes (required by Claas, CNH and others)
       '    <GRD A="' + latMin.toFixed(8) + '" B="' + lonMin.toFixed(8) + '"\n' +
       '         C="' + cellLatDeg.toFixed(8) + '" D="' + cellLonDeg.toFixed(8) + '"\n' +
-      '         E="' + numCols + '" F="' + numRows + '" G="GRD00001" I="0"/>\n' +
+      '         E="' + numCols + '" F="' + numRows + '" G="GRD00001"\n' +
+      '         H="' + fileLength + '" I="1"/>\n' +
       '  </TSK>\n</ISO11783_TaskData>\n';
     return _buildZipBlob([
       { name: 'TASKDATA/TASKDATA.XML', data: enc.encode(xmlStr) },
-      { name: 'TASKDATA/GRD00001.BIN', data: gridBin },
+      { name: 'TASKDATA/GRD00001.BIN', data: gridBinFinal },
     ]);
   }
 

@@ -51,7 +51,7 @@ body {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
   z-index: 1000;
 }
 
@@ -86,9 +86,43 @@ body {
   font-weight: 400;
 }
 
+.subtitle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.subtitle-row .subtitle {
+  margin-top: 0;
+}
+
+.github-link {
+  display: flex;
+  align-items: center;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+.github-link:hover {
+  opacity: 0.85;
+}
+.github-icon {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
 .sidebar-steps {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 8px 0;
+  /* Hide scrollbar track on all browsers — still scrollable */
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE 11 */
+}
+.sidebar-steps::-webkit-scrollbar {
+  display: none;                  /* Chrome / Edge / Safari */
 }
 
 /* ---------- Steps ---------- */
@@ -397,19 +431,21 @@ input[type="range"]::-webkit-slider-thumb {
 
 .btn-classify-hint {
   background: none;
-  border: none;
-  padding: 0;
-  font-size: 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
   color: var(--text-secondary);
   cursor: pointer;
-  font-style: italic;
-  opacity: 0.55;
-  transition: opacity 0.15s, color 0.15s;
-  line-height: 1;
+  opacity: 0.75;
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+  line-height: 1.4;
+  white-space: nowrap;
 }
 .btn-classify-hint:hover {
   opacity: 1;
   color: var(--accent);
+  border-color: var(--accent);
 }
 
 .btn-icon {

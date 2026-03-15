@@ -63,7 +63,7 @@ Pure HTML, CSS en vanilla JavaScript — geen frameworks, geen Node.js, geen bui
 ## Snel starten
 
 ```bash
-git clone https://github.com/your-org/NDVItoTaskmap.git
+git clone https://github.com/HASUniversity/NDVItoTaskmap.git
 cd NDVItoTaskmap
 ```
 
@@ -89,7 +89,7 @@ Perceelgrenzen en gewasregistraties worden live opgehaald van [PDOK](https://www
 
 ## Licentie
 
-[MIT](LICENSE) © 2026 Contributors
+[MIT](LICENSE) © 2026 Contributors — [github.com/HASUniversity/NDVItoTaskmap](https://github.com/HASUniversity/NDVItoTaskmap)
 
 ---
 
@@ -158,7 +158,7 @@ Pure HTML, CSS, and vanilla JavaScript. No frameworks, no Node.js, no build tool
 ### Quick Start
 
 ```bash
-git clone https://github.com/your-org/NDVItoTaskmap.git
+git clone https://github.com/HASUniversity/NDVItoTaskmap.git
 cd NDVItoTaskmap
 ```
 
@@ -184,4 +184,4 @@ Parcel boundaries and crop registrations are retrieved live from [PDOK](https://
 
 ### License
 
-[MIT](LICENSE) © 2026 Contributors
+[MIT](LICENSE) © 2026 Contributors — [github.com/HASUniversity/NDVItoTaskmap](https://github.com/HASUniversity/NDVItoTaskmap)
