@@ -850,7 +850,7 @@ input[type="range"]::-moz-range-thumb {
   margin-bottom: 4px;
 }
 /* On mobile: hide the fixed legend (it's not needed there) */
-@media (max-width: 768px) {
+@media (max-width: 768px) and (hover: none) and (pointer: coarse) {
   .desktop-legend { display: none !important; }
 }
 
@@ -968,7 +968,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ---------- Responsive ---------- */
-@media (max-width: 768px) {
+@media (max-width: 768px) and (hover: none) and (pointer: coarse) {
   :root {
     --sidebar-w: 100vw;
   }

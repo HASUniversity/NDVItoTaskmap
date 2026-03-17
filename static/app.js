@@ -185,22 +185,45 @@
   // ==========================================
   var _activeBasemap = 'Esri Satelliet';
 
+  function isMobileUI() {
+    return window.matchMedia('(max-width: 768px) and (hover: none) and (pointer: coarse)').matches;
+  }
+
+  function isMobileLegendMenu() {
+    return isMobileUI();
+  }
+
+  function createLayerToggleButton(container, panel) {
+    var toggleBtn = L.DomUtil.create('button', 'ulc-toggle', container);
+    toggleBtn.title = 'Lagen';
+    toggleBtn.innerHTML =
+      '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<rect x="2" y="3" width="16" height="3" rx="1"/>' +
+      '<rect x="2" y="9" width="16" height="3" rx="1"/>' +
+      '<rect x="2" y="15" width="16" height="3" rx="1"/>' +
+      '</svg>';
+    toggleBtn.addEventListener('click', function () {
+      panel.classList.toggle('hidden');
+      toggleBtn.classList.toggle('active');
+    });
+    return toggleBtn;
+  }
+
+  function setLegendLabels(minValue, maxValue) {
+    var mid = ((minValue + maxValue) / 2).toFixed(2);
+    var markup = '<span>' + minValue.toFixed(2) + '</span><span>' + mid + '</span><span>' + maxValue.toFixed(2) + '</span>';
+    ['legend-labels', 'mobile-legend-labels'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.innerHTML = markup;
+    });
+  }
+
   var layerControl = L.Control.extend({
     options: { position: 'bottomright' },
     onAdd: function () {
       var div = L.DomUtil.create('div', 'ulc-wrap');
       L.DomEvent.disableClickPropagation(div);
       L.DomEvent.disableScrollPropagation(div);
-
-      // Toggle button (always visible)
-      var toggleBtn = L.DomUtil.create('button', 'ulc-toggle', div);
-      toggleBtn.title = 'Lagen';
-      toggleBtn.innerHTML =
-        '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-        '<rect x="2" y="3" width="16" height="3" rx="1"/>' +
-        '<rect x="2" y="9" width="16" height="3" rx="1"/>' +
-        '<rect x="2" y="15" width="16" height="3" rx="1"/>' +
-        '</svg>';
 
       // Panel
       var panel = L.DomUtil.create('div', 'ulc-panel hidden', div);
@@ -215,16 +238,19 @@
         '<label class="ulc-check"><input type="checkbox" data-layer="taakkaart"> \uD83D\uDCCB Taakkaart</label>' +
         '<label class="ulc-check"><input type="checkbox" data-layer="percelen" checked> \uD83D\uDFE1 Percelen</label>' +
         '<label class="ulc-check"><input type="checkbox" data-layer="selectie" checked> \u2705 Selectie</label>' +
+        '<div class="ulc-sep ulc-ndvi-section" style="display:none"></div>' +
+        '<div class="ulc-ndvi-section" style="display:none">' +
+          '<div class="ulc-section-title" id="mobile-legend-title">NDVI</div>' +
+          '<div class="legend-gradient"></div>' +
+          '<div class="legend-labels" id="mobile-legend-labels"><span>laag</span><span></span><span>hoog</span></div>' +
+        '</div>' +
         '<div id="legend-parcel" style="display:none">' +
           '<div class="legend-parcel-sep"></div>' +
           '<div id="legend-parcel-content"></div>' +
         '</div>';
-
-      toggleBtn.addEventListener('click', function () {
-        if (!window.matchMedia('(max-width: 768px)').matches) return;
-        panel.classList.toggle('hidden');
-        toggleBtn.classList.toggle('active');
-      });
+      div._panel = panel;
+      div._toggleBtn = null;
+      if (isMobileLegendMenu()) div._toggleBtn = createLayerToggleButton(div, panel);
 
       // Basemap radios
       panel.querySelectorAll('input[name="basemap"]').forEach(function (radio) {
@@ -268,25 +294,31 @@
   function syncLayerControlLayout() {
     var container = _layerControlInstance && _layerControlInstance.getContainer();
     if (!container) return;
-    var panel = container.querySelector('.ulc-panel');
-    var toggleBtn = container.querySelector('.ulc-toggle');
-    if (!panel || !toggleBtn) return;
-    var isMobile = window.matchMedia('(max-width: 768px)').matches;
-    toggleBtn.style.display = isMobile ? 'flex' : 'none';
+    var panel = container._panel || container.querySelector('.ulc-panel');
+    var toggleBtn = container._toggleBtn || container.querySelector('.ulc-toggle');
+    if (!panel) return;
+    var isMobile = isMobileLegendMenu();
     if (isMobile) {
+      if (!toggleBtn) {
+        toggleBtn = createLayerToggleButton(container, panel);
+        container._toggleBtn = toggleBtn;
+      }
       panel.classList.add('hidden');
       toggleBtn.classList.remove('active');
       return;
     }
+    if (toggleBtn) {
+      toggleBtn.remove();
+      container._toggleBtn = null;
+    }
     panel.classList.remove('hidden');
-    toggleBtn.classList.remove('active');
     panel.style.display = 'flex';
   }
 
   function syncMobilePaneToggle() {
     var btn = document.getElementById('mobile-toggle');
     if (!btn) return;
-    btn.style.display = window.matchMedia('(max-width: 768px)').matches ? 'flex' : 'none';
+    btn.style.display = isMobileUI() ? 'flex' : 'none';
   }
 
   // Wire overlay references into the control once all layerGroups exist
@@ -315,6 +347,8 @@
     // Update title to current VI name
     var title = document.getElementById('desktop-legend-title');
     if (title) title.textContent = state.selectedVI || 'NDVI';
+    var mobileTitle = document.getElementById('mobile-legend-title');
+    if (mobileTitle) mobileTitle.textContent = state.selectedVI || 'NDVI';
     // Mobile fallback: also show sections inside ULC panel if present
     document.querySelectorAll('.ulc-ndvi-section').forEach(function (el) {
       el.style.display = '';
@@ -508,7 +542,7 @@
     stepEl.classList.add('active');
     // On mobile the sidebar is a bottom-sheet; scroll the opened step into
     // view so the user doesn't need to manually scroll down to see it.
-    if (window.innerWidth <= 768) {
+    if (isMobileUI()) {
       setTimeout(function () {
         stepEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }, 60);
@@ -1193,11 +1227,7 @@
     showLegendInPanel();
     // Update legend labels with actual scale range
     setTimeout(function () {
-      var ll = document.getElementById('legend-labels');
-      if (ll && ndviCount > 0) {
-        var mid = ((scaleMin + scaleMax) / 2).toFixed(2);
-        ll.innerHTML = '<span>' + scaleMin.toFixed(2) + '</span><span>' + mid + '</span><span>' + scaleMax.toFixed(2) + '</span>';
-      }
+      if (ndviCount > 0) setLegendLabels(scaleMin, scaleMax);
     }, 50);
   }
 
@@ -1598,11 +1628,7 @@
 
     // Update legend labels
     setTimeout(function () {
-      var ll = document.getElementById('legend-labels');
-      if (ll) {
-        var mid = ((scaleMin + scaleMax) / 2).toFixed(2);
-        ll.innerHTML = '<span>' + scaleMin.toFixed(2) + '</span><span>' + mid + '</span><span>' + scaleMax.toFixed(2) + '</span>';
-      }
+      setLegendLabels(scaleMin, scaleMax);
     }, 50);
 
     // Redraw histogram
@@ -2551,7 +2577,7 @@
     var hdr = sidebar.querySelector('.sidebar-header');
     if (hdr) {
       hdr.addEventListener('click', function (e) {
-        if (window.innerWidth <= 768) {
+        if (isMobileUI()) {
           open = !open;
           update();
           setTimeout(function () { map.invalidateSize(); }, 360);
