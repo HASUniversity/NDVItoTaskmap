@@ -61,19 +61,37 @@
         <section class="step disabled" data-step="2" id="step-2">
           <div class="step-header" data-toggle="2">
             <div class="step-indicator"><span>2</span></div>
-            <h2>Banden &amp; NDVI</h2>
+            <h2>Banden &amp; Index</h2>
             <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
           </div>
           <div class="step-body">
-            <p class="step-desc" id="band-desc">Selecteer de Red en NIR banden voor NDVI-berekening.</p>
+            <p class="step-desc" id="band-desc">Selecteer de banden en vegetatie-index.</p>
             <div id="band-selectors">
+              <div class="form-row">
+                <label for="vi-select">Vegetatie-index</label>
+                <select id="vi-select">
+                  <option value="NDVI">NDVI — (NIR − R) / (NIR + R)</option>
+                  <option value="GNDVI">GNDVI — (NIR − G) / (NIR + G)</option>
+                  <option value="NDRE">NDRE — (NIR − RE) / (NIR + RE)</option>
+                  <option value="SAVI">SAVI — 1.5·(NIR − R) / (NIR + R + 0.5)</option>
+                  <option value="OSAVI">OSAVI — (NIR − R) / (NIR + R + 0.16)</option>
+                </select>
+              </div>
               <div class="form-row">
                 <label for="red-band">Red band</label>
                 <select id="red-band"></select>
               </div>
               <div class="form-row">
+                <label for="green-band">Green band</label>
+                <select id="green-band"></select>
+              </div>
+              <div class="form-row">
                 <label for="nir-band">NIR band</label>
                 <select id="nir-band"></select>
+              </div>
+              <div class="form-row">
+                <label for="rededge-band">RedEdge band</label>
+                <select id="rededge-band"></select>
               </div>
               <div class="form-row">
                 <label for="stretch-ndvi" style="cursor:pointer">
@@ -87,7 +105,7 @@
                 <div style="display:flex;justify-content:space-between;font-size:10px;color:#888"><span>512 (snel)</span><span>8192 (nauwkeurig)</span></div>
               </div>
             </div>
-            <button class="btn btn-primary" id="compute-ndvi-btn">Bereken NDVI</button>
+            <button class="btn btn-primary" id="compute-ndvi-btn">Bereken index</button>
           </div>
         </section>
 
@@ -227,6 +245,6 @@
   <script src="static/vendor/turf.min.js"></script>
   <script src="static/vendor/geotiff.js"></script>
   <!-- App -->
-  <script src="static/app.js?v=17"></script>
+  <script src="static/app.js?v=18"></script>
 </body>
 </html>

@@ -46,7 +46,10 @@
     gridAngle: 0,       // rotation angle in degrees (0 = north-south rows)
     parcelHistoryCache: {}, // keyed by centroid string
     bandRed: null,
+    bandGreen: null,
     bandNIR: null,
+    bandRedEdge: null,
+    selectedVI: 'NDVI',
     classes: JSON.parse(JSON.stringify(DEFAULT_CLASSES)),
     unit: 'kg/ha',
     currentStep: 1,
@@ -65,7 +68,10 @@
   const fileDrop = $('#file-drop');
   const fileInfo = $('#file-info');
   const redBandSel = $('#red-band');
+  const greenBandSel = $('#green-band');
   const nirBandSel = $('#nir-band');
+  const rededgeBandSel = $('#rededge-band');
+  const viSelect = $('#vi-select');
   const computeBtn = $('#compute-ndvi-btn');
   const stretchCheck = $('#stretch-ndvi');
   const resolutionSlider = $('#resolution-slider');
@@ -715,8 +721,12 @@
         // Fallback positions for 5-band alphabetical ODM order: B(0),G(1),NIR(2),R(3),RE(4)
         state.bandRed = pickBand(620, 700, /\bred\b(?!.?edge)/i,
           [nDataBands >= 5 ? 3 : (nDataBands >= 4 ? 2 : 0)]);
+        state.bandGreen = pickBand(520, 580, /\bgreen\b/i,
+          [nDataBands >= 5 ? 1 : (nDataBands >= 3 ? 1 : 0)]);
         state.bandNIR = pickBand(780, 960, /\bnir\b|near.?ir|near.?infra/i,
           [nDataBands >= 5 ? 2 : (nDataBands >= 4 ? 3 : nDataBands - 1)]);
+        state.bandRedEdge = pickBand(700, 780, /\bred.?edge\b|\bre\b/i,
+          [nDataBands >= 5 ? 4 : -1]);
         // If wavelength/name were both absent → use value-range heuristic:
         // NIR band typically has the highest mean reflectance
         var hasWlOrName = bandMetas.some(function(m) { return m.wavelength > 0 || m.name; });
@@ -802,7 +812,9 @@
    */
   function populateBandSelectors(n) {
     redBandSel.innerHTML = '';
+    greenBandSel.innerHTML = '';
     nirBandSel.innerHTML = '';
+    rededgeBandSel.innerHTML = '';
     var metas = state.bandMetas || [];
     // ODM alphabetical order fallback names for common configurations
     var odmNames5 = ['Blue (B)', 'Green (G)', 'NIR', 'Red (R)', 'RedEdge (RE)'];
@@ -820,13 +832,11 @@
       } else if (m.name) {
         lbl = 'B' + (i + 1) + ': ' + m.name;
       } else if (state.isRGBProxy) {
-        // RGB(A) image — label channels as R, G, B (not ODM multispectral order)
         var rgbName = n >= 4 ? (rgbNames4[i] || 'Band ' + (i + 1))
           : n === 3 ? (rgbNames3[i] || 'Band ' + (i + 1))
           : 'Band ' + (i + 1);
         lbl = 'B' + (i + 1) + ': ' + rgbName + (gr ? '  [' + gr.mins[i].toFixed(2) + '\u2013' + gr.maxs[i].toFixed(2) + ']' : '');
       } else {
-        // Use ODM naming convention based on band count
         var guessName = n === 5 ? odmNames5[i]
           : n === 4 ? odmNames4[i]
           : n === 3 ? odmNames3[i]
@@ -834,28 +844,53 @@
         lbl = 'B' + (i + 1) + ': ' + guessName + (gr ? '  [' + gr.mins[i].toFixed(2) + '\u2013' + gr.maxs[i].toFixed(2) + ']' : '');
       }
       redBandSel.add(new Option(lbl, i));
+      greenBandSel.add(new Option(lbl, i));
       nirBandSel.add(new Option(lbl, i));
+      rededgeBandSel.add(new Option(lbl, i));
     }
     if (state.bandRed !== null) redBandSel.value = state.bandRed;
+    if (state.bandGreen !== null) greenBandSel.value = state.bandGreen;
     if (state.bandNIR !== null) nirBandSel.value = state.bandNIR;
+    if (state.bandRedEdge !== null && state.bandRedEdge >= 0) rededgeBandSel.value = state.bandRedEdge;
+    if (viSelect) viSelect.value = state.selectedVI || 'NDVI';
+    updateBandSelectorVisibility();
   }
+
+  // Show/hide band selectors based on which bands the selected VI needs
+  function updateBandSelectorVisibility() {
+    var vi = viSelect ? viSelect.value : 'NDVI';
+    var needsRed = (vi === 'NDVI' || vi === 'SAVI' || vi === 'OSAVI');
+    var needsGreen = (vi === 'GNDVI');
+    var needsRE = (vi === 'NDRE');
+    // NIR is always needed
+    redBandSel.closest('.form-row').style.display = needsRed ? '' : 'none';
+    greenBandSel.closest('.form-row').style.display = needsGreen ? '' : 'none';
+    rededgeBandSel.closest('.form-row').style.display = needsRE ? '' : 'none';
+  }
+  if (viSelect) viSelect.addEventListener('change', updateBandSelectorVisibility);
 
   computeBtn.addEventListener('click', function () {
     state.bandRed = parseInt(redBandSel.value);
+    state.bandGreen = parseInt(greenBandSel.value);
     state.bandNIR = parseInt(nirBandSel.value);
-    // Keep isRGBProxy intact — for RGB proxy files the display should stay
-    // as-is (raw RGB image) while sampleNDVI uses the selected bands.
+    state.bandRedEdge = parseInt(rededgeBandSel.value);
+    state.selectedVI = viSelect ? viSelect.value : 'NDVI';
     state.isPreCalc = false;
-    if (state.bandRed === state.bandNIR) {
-      toast('Red en NIR mogen niet dezelfde band zijn.', true);
+    state.isRGBProxy = false;
+    var vi = state.selectedVI;
+    // Validate: the two bands used must differ
+    var bandA = state.bandNIR;
+    var bandB = vi === 'GNDVI' ? state.bandGreen : vi === 'NDRE' ? state.bandRedEdge : state.bandRed;
+    if (bandA === bandB) {
+      toast('De twee gebruikte banden mogen niet dezelfde zijn.', true);
       return;
     }
-    showLoading('NDVI berekenen...');
+    showLoading(vi + ' berekenen...');
     setTimeout(function () {
       displayNDVI();
       zoomToGeoTIFF();
       hideLoading();
-      toast('NDVI berekend en weergegeven.');
+      toast(state.selectedVI + ' berekend en weergegeven.');
       activateStep(3);
       startBRPLoading();
     }, 50);
@@ -945,15 +980,19 @@
 
     var isP = state.isPreCalc;
     var bR = state.bandRed;
+    var bG = state.bandGreen;
     var bN = state.bandNIR;
+    var bRE = state.bandRedEdge;
+    var vi = state.selectedVI || 'NDVI';
     var noData = gr.noDataValue;
     var isFloat = state.bandMetas.length > 0 && state.bandMetas[0].sampleFormat === 3;
     var noDataEps = (isFloat && noData !== null) ? 1e-6 : 0;
     function nd(v) { return v === null || isNaN(v) || (noData !== null && (noDataEps > 0 ? Math.abs(v - noData) < noDataEps : v === noData)); }
     var stretch = stretchCheck && stretchCheck.checked;
     // Detect alpha channel so transparent background pixels are skipped
-    var hasAlpha = gr.numberOfRasters >= 4 && state.bandMetas.length > 0 &&
-      (gr.numberOfRasters > Math.max(bR, bN) + 1);
+    var maxBandIdx = Math.max(bR || 0, bG || 0, bN || 0, bRE || 0);
+    var hasAlpha = gr.numberOfRasters >= 2 && state.bandMetas.length > 0 &&
+      (gr.numberOfRasters > maxBandIdx + 1);
     var alphaBand = hasAlpha ? gr.numberOfRasters - 1 : -1;
 
     // Render NDVI directly to a canvas and use L.imageOverlay
@@ -978,12 +1017,26 @@
           if (nd(v)) continue;
           ndvi = v;
         } else {
-          var rv = gr.values[bR][row][col];
-          var nv = gr.values[bN][row][col];
-          if (nd(rv) || nd(nv)) continue;
-          var s = nv + rv;
+          // Get the two bands needed for the selected index
+          var b1v, b2v; // b1 = NIR, b2 = the other band
+          b1v = gr.values[bN][row][col];
+          if (vi === 'GNDVI') {
+            b2v = gr.values[bG][row][col];
+          } else if (vi === 'NDRE') {
+            b2v = gr.values[bRE][row][col];
+          } else {
+            b2v = gr.values[bR][row][col];
+          }
+          if (nd(b1v) || nd(b2v)) continue;
+          var s = b1v + b2v;
           if (s === 0) continue;
-          ndvi = (nv - rv) / s;
+          if (vi === 'SAVI') {
+            ndvi = 1.5 * (b1v - b2v) / (b1v + b2v + 0.5);
+          } else if (vi === 'OSAVI') {
+            ndvi = (b1v - b2v) / (b1v + b2v + 0.16);
+          } else {
+            ndvi = (b1v - b2v) / s;
+          }
           if (ndvi < -1 || ndvi > 1) continue; // skip extreme outliers
         }
         ndviGrid[row * gr.width + col] = ndvi;
@@ -2183,20 +2236,26 @@
           if (nd(pv)) continue;
           ndvi = pv;
         } else if (state.isRGBProxy) {
-          // RGB export: proxy NDVI = (Green - Red) / (Green + Red)
-          // High green = healthy vegetation → high proxy NDVI
           var rrv = gr.values[state.bandRed][r] ? gr.values[state.bandRed][r][c] : undefined;
           var ggv = gr.values[state.bandNIR][r] ? gr.values[state.bandNIR][r][c] : undefined;
           if (rrv === undefined || ggv === undefined) continue;
           if ((rrv + ggv) === 0) continue;
           ndvi = (ggv - rrv) / (ggv + rrv);
         } else {
-          var rv = gr.values[state.bandRed][r] ? gr.values[state.bandRed][r][c] : undefined;
-          var nv = gr.values[state.bandNIR][r] ? gr.values[state.bandNIR][r][c] : undefined;
-          if (nd(rv) || nd(nv)) continue;
-          var ss = nv + rv;
+          var vi = state.selectedVI || 'NDVI';
+          var nirV = gr.values[state.bandNIR][r] ? gr.values[state.bandNIR][r][c] : undefined;
+          var otherBand = vi === 'GNDVI' ? state.bandGreen : vi === 'NDRE' ? state.bandRedEdge : state.bandRed;
+          var otherV = gr.values[otherBand][r] ? gr.values[otherBand][r][c] : undefined;
+          if (nd(nirV) || nd(otherV)) continue;
+          var ss = nirV + otherV;
           if (ss === 0) continue;
-          ndvi = (nv - rv) / ss;
+          if (vi === 'SAVI') {
+            ndvi = 1.5 * (nirV - otherV) / (nirV + otherV + 0.5);
+          } else if (vi === 'OSAVI') {
+            ndvi = (nirV - otherV) / (nirV + otherV + 0.16);
+          } else {
+            ndvi = (nirV - otherV) / ss;
+          }
           if (ndvi < -1 || ndvi > 1) continue;
         }
         if (!nd(ndvi)) {
