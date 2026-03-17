@@ -11,10 +11,13 @@ Een browser-gebaseerde tool om variabele-dosering taakkaarten te genereren vanui
 ## Functies
 
 * **GeoTIFF upload** — Ondersteuning voor WebODM/ODM multispectrale beelden, pre-berekende NDVI en DJI Terra RGB Plant Health exports.
-* **Automatische banddetectie** — Detecteert Red/NIR via golflengte-metadata of ODM-conventie; handmatige override mogelijk.
+* **Automatische banddetectie** — Detecteert Red, Green, NIR en RedEdge via golflengte-metadata of ODM-conventie; handmatige override mogelijk.
+* **Meerdere vegetatie-indexen** — NDVI, GNDVI, NDRE, SAVI en OSAVI. Selecteer de index in de UI; de juiste banden worden automatisch geselecteerd.
+* **Instelbare resolutie** — Slider van 512–8192 px bepaalt op welke resolutie het raster geladen wordt. Hogere waarden geven nauwkeurigere indexberekeningen.
+* **Parcel clipping** — NDVI-overlay en histogram worden automatisch geknipt naar geselecteerde percelen. Kleuren en schaal blijven consistent met het volledige raster.
 * **BRP perceelintegratie** — Laadt live Nederlandse perceelgrenzen via PDOK WFS; selecteer percelen door erop te klikken.
 * **Gewashistorie** — Toont jaarlijkse gewasregistraties per perceel op basis van BRP-data.
-* **NDVI-histogram** — Visuele verdeling van NDVI-waarden over het perceel met klasgrenzen.
+* **NDVI-histogram** — Visuele verdeling van indexwaarden over het perceel met klasgrenzen.
 * **Auto-classificatie** — Verdeelt klassen automatisch op basis van gelijke NDVI-oppervlakte.
 * **Rijrichting** — Noord-Zuid knop of automatische optimale rijrichting op basis van de langste perceelzijde; realtime taakkaart preview.
 * **Exportformaten** — Shapefile, ISOXML TaskData, GeoJSON en CSV (zie tabel hieronder).
@@ -74,9 +77,9 @@ Open `index.html` direct in Chrome, Firefox of Edge. Geen lokale webserver verei
 ## Workflow
 
 1. **GeoTIFF laden** — Sleep een multispectrale `.tif` in de browser of klik om te uploaden.
-2. **Banden & NDVI** — Controleer de automatische banddetectie; klik op *Bereken NDVI*.
-3. **Percelen selecteren** — Zoom in tot niveau 14+; BRP-percelen laden automatisch. Klik een perceel om te selecteren.
-4. **Taakkaart instellen** — Stel gridgrootte, eenheid, rijrichting en doseringsklassen in. Gebruik *auto-classificeer* voor gelijke NDVI-verdeling over klassen.
+2. **Index & banden** — Kies een vegetatie-index (NDVI, GNDVI, NDRE, SAVI of OSAVI), stel de gewenste resolutie in en klik *Bereken*. Banden worden automatisch gedetecteerd.
+3. **Percelen selecteren** — Zoom in tot niveau 14+; BRP-percelen laden automatisch. Klik een perceel om te selecteren. De overlay en het histogram worden automatisch geknipt naar het geselecteerde perceel.
+4. **Taakkaart instellen** — Stel gridgrootte, eenheid, rijrichting en doseringsklassen in. Gebruik *auto-classificeer* voor gelijke verdeling over klassen.
 5. **Exporteren** — Download in het gewenste formaat voor tractor-terminal of FMIS.
 
 ---
@@ -106,11 +109,14 @@ A browser-based tool for generating variable-rate prescription task maps from mu
 ### Features
 
 * **GeoTIFF upload** — Supports WebODM/ODM multispectral, pre-calculated NDVI, and DJI Terra RGB Plant Health exports.
-* **Automatic band detection** — Detects Red/NIR via wavelength metadata or ODM convention; manual override available.
+* **Automatic band detection** — Detects Red, Green, NIR, and RedEdge via wavelength metadata or ODM convention; manual override available.
+* **Multiple vegetation indices** — NDVI, GNDVI, NDRE, SAVI, and OSAVI. Select the index in the UI; the required bands are auto-selected.
+* **Adjustable resolution** — Slider from 512–8192 px controls the raster loading resolution. Higher values give more accurate index calculations.
+* **Parcel clipping** — The index overlay and histogram are automatically clipped to selected parcels. Colour scale and legend remain consistent with the full raster.
 * **BRP parcel integration** — Loads live Dutch agricultural field boundaries via PDOK WFS; click to select parcels.
 * **Crop history** — Displays annual crop registrations per parcel from BRP data.
-* **NDVI histogram** — Visual distribution of NDVI values across the parcel with class boundaries overlaid.
-* **Auto-classify** — Divides classes automatically into equal-area NDVI buckets.
+* **Index histogram** — Visual distribution of index values across the parcel with class boundaries overlaid.
+* **Auto-classify** — Divides classes automatically into equal-area index buckets.
 * **Driving direction** — North-South button or auto-optimal direction based on the longest parcel edge; live task map preview.
 * **Export formats** — Shapefile, ISOXML TaskData, GeoJSON, and CSV (see table below).
 * **Fully offline-capable** — All vendor libraries bundled; no internet required after clone (except live PDOK data).
@@ -169,9 +175,9 @@ Open `index.html` directly in Chrome, Firefox, or Edge. No local web server requ
 ### Workflow
 
 1. **Load GeoTIFF** — Drag and drop a multispectral `.tif` into the browser or click to upload.
-2. **Bands & NDVI** — Verify automatic band detection; click *Calculate NDVI*.
-3. **Select Parcels** — Zoom to level 14+; BRP parcels load automatically. Click a field to select.
-4. **Configure Task Map** — Set grid size, unit, driving direction, and dosage classes. Use *auto-classify* for equal NDVI distribution across classes.
+2. **Index & Bands** — Choose a vegetation index (NDVI, GNDVI, NDRE, SAVI, or OSAVI), set the desired resolution, and click *Calculate*. Bands are auto-detected.
+3. **Select Parcels** — Zoom to level 14+; BRP parcels load automatically. Click a field to select. The overlay and histogram are automatically clipped to the selected parcel(s).
+4. **Configure Task Map** — Set grid size, unit, driving direction, and dosage classes. Use *auto-classify* for equal index distribution across classes.
 5. **Export** — Download in your preferred format for the tractor terminal or FMIS.
 
 ---
