@@ -81,6 +81,11 @@
                   Kleurschaal aanpassen aan data
                 </label>
               </div>
+              <div class="form-row" id="resolution-row">
+                <label for="resolution-slider">Resolutie: <span id="resolution-value">1024</span> px</label>
+                <input type="range" id="resolution-slider" min="512" max="8192" step="512" value="1024" style="width:100%" />
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:#888"><span>512 (snel)</span><span>8192 (nauwkeurig)</span></div>
+              </div>
             </div>
             <button class="btn btn-primary" id="compute-ndvi-btn">Bereken NDVI</button>
           </div>
@@ -222,6 +227,6 @@
   <script src="static/vendor/turf.min.js"></script>
   <script src="static/vendor/geotiff.js"></script>
   <!-- App -->
-  <script src="static/app.js?v=15"></script>
+  <script src="static/app.js?v=17"></script>
 </body>
 </html>

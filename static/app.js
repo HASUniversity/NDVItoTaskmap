@@ -68,6 +68,13 @@
   const nirBandSel = $('#nir-band');
   const computeBtn = $('#compute-ndvi-btn');
   const stretchCheck = $('#stretch-ndvi');
+  const resolutionSlider = $('#resolution-slider');
+  const resolutionValue = $('#resolution-value');
+  if (resolutionSlider) {
+    resolutionSlider.addEventListener('input', function () {
+      if (resolutionValue) resolutionValue.textContent = resolutionSlider.value;
+    });
+  }
   const gridSlider = $('#grid-size');
   const gridValue = $('#grid-size-value');
   const gridAngleSlider = $('#grid-angle');
@@ -588,18 +595,31 @@
       state.tiffImage   = image;
       state.geotiffEPSG = epsg;
 
-      // Step 2: pick smallest overview >= 256px wide (much faster read for large files)
+      // Step 2: pick best overview for target resolution
       var readImage = image;
-      var MAX_DIM = 1024;
+      var resSlider = $('#resolution-slider');
+      var MAX_DIM = resSlider ? parseInt(resSlider.value) || 1024 : 1024;
       if (imageCount > 1) {
-        for (var oi = imageCount - 1; oi >= 1; oi--) {
+        // Walk overviews from smallest to largest; pick the smallest that is >= MAX_DIM.
+        // If none are large enough, fall back to the full-resolution image (index 0).
+        var candidates = [];
+        for (var oi = 1; oi < imageCount; oi++) {
           var ov = await tiff.getImage(oi);
-          if (ov.getWidth() >= 256) { readImage = ov; break; }
+          candidates.push({ idx: oi, w: ov.getWidth(), img: ov });
         }
+        candidates.sort(function (a, b) { return a.w - b.w; }); // ascending by width
+        for (var ci = 0; ci < candidates.length; ci++) {
+          if (candidates[ci].w >= MAX_DIM) {
+            readImage = candidates[ci].img;
+            break;
+          }
+        }
+        // If no overview is large enough, readImage stays as the full-res image (index 0)
       }
       var rw = readImage.getWidth(), rh = readImage.getHeight();
       var scale = Math.max(rw / MAX_DIM, rh / MAX_DIM, 1);
       var tw = Math.ceil(rw / scale), th = Math.ceil(rh / scale);
+      console.log('[Resolutie] slider=' + MAX_DIM + ' overview=' + rw + 'x' + rh + ' output=' + tw + 'x' + th + ' scale=' + scale.toFixed(2));
 
       loadingText.textContent = 'Banden laden (' + tw + '\xd7' + th + ' px)\u2026';
 
