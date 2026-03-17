@@ -76,9 +76,40 @@
   const stretchCheck = $('#stretch-ndvi');
   const resolutionSlider = $('#resolution-slider');
   const resolutionValue = $('#resolution-value');
+  let resolutionReloadTimer = null;
+  function getRequestedResolution() {
+    var requested = resolutionSlider ? parseInt(resolutionSlider.value, 10) : 1024;
+    return isNaN(requested) ? 1024 : requested;
+  }
+  async function reloadResolutionFromSlider() {
+    if (!state.tiff || !state.tiffImage) return;
+    var targetResolution = getRequestedResolution();
+    showLoading('GeoTIFF herladen op ' + targetResolution + ' px…');
+    resolutionSlider.disabled = true;
+    try {
+      await rebuildGeoRasterAtResolution(targetResolution);
+      displayNDVI();
+      toast('Resolutie ingesteld op ' + targetResolution + ' px.');
+    } catch (err) {
+      console.error(err);
+      toast('Resolutie wijzigen mislukt: ' + err.message, true);
+    } finally {
+      resolutionSlider.disabled = false;
+      hideLoading();
+    }
+  }
   if (resolutionSlider) {
     resolutionSlider.addEventListener('input', function () {
       if (resolutionValue) resolutionValue.textContent = resolutionSlider.value;
+      if (!state.tiff || !state.tiffImage) return;
+      clearTimeout(resolutionReloadTimer);
+      resolutionReloadTimer = setTimeout(function () {
+        reloadResolutionFromSlider();
+      }, 180);
+    });
+    resolutionSlider.addEventListener('change', function () {
+      clearTimeout(resolutionReloadTimer);
+      reloadResolutionFromSlider();
     });
   }
   const gridSlider = $('#grid-size');
@@ -184,18 +215,13 @@
         '<label class="ulc-check"><input type="checkbox" data-layer="taakkaart"> \uD83D\uDCCB Taakkaart</label>' +
         '<label class="ulc-check"><input type="checkbox" data-layer="percelen" checked> \uD83D\uDFE1 Percelen</label>' +
         '<label class="ulc-check"><input type="checkbox" data-layer="selectie" checked> \u2705 Selectie</label>' +
-        '<div class="ulc-sep ulc-ndvi-section" style="display:none"></div>' +
-        '<div class="ulc-section-title ulc-ndvi-section" style="display:none">NDVI schaal</div>' +
-        '<div class="ulc-ndvi-section" style="display:none">' +
-          '<div class="legend-gradient"></div>' +
-          '<div class="legend-labels" id="legend-labels"><span>laag</span><span></span><span>hoog</span></div>' +
-        '</div>' +
         '<div id="legend-parcel" style="display:none">' +
           '<div class="legend-parcel-sep"></div>' +
           '<div id="legend-parcel-content"></div>' +
         '</div>';
 
       toggleBtn.addEventListener('click', function () {
+        if (!window.matchMedia('(max-width: 768px)').matches) return;
         panel.classList.toggle('hidden');
         toggleBtn.classList.toggle('active');
       });
@@ -239,6 +265,30 @@
 
   var _layerControlInstance = new layerControl().addTo(map);
 
+  function syncLayerControlLayout() {
+    var container = _layerControlInstance && _layerControlInstance.getContainer();
+    if (!container) return;
+    var panel = container.querySelector('.ulc-panel');
+    var toggleBtn = container.querySelector('.ulc-toggle');
+    if (!panel || !toggleBtn) return;
+    var isMobile = window.matchMedia('(max-width: 768px)').matches;
+    toggleBtn.style.display = isMobile ? 'flex' : 'none';
+    if (isMobile) {
+      panel.classList.add('hidden');
+      toggleBtn.classList.remove('active');
+      return;
+    }
+    panel.classList.remove('hidden');
+    toggleBtn.classList.remove('active');
+    panel.style.display = 'flex';
+  }
+
+  function syncMobilePaneToggle() {
+    var btn = document.getElementById('mobile-toggle');
+    if (!btn) return;
+    btn.style.display = window.matchMedia('(max-width: 768px)').matches ? 'flex' : 'none';
+  }
+
   // Wire overlay references into the control once all layerGroups exist
   (function () {
     var om = _layerControlInstance.getContainer()._overlayMap;
@@ -249,13 +299,23 @@
       om.selectie   = selectionOverlay;
     }
   })();
+  syncLayerControlLayout();
+  syncMobilePaneToggle();
+  window.addEventListener('resize', syncLayerControlLayout);
+  window.addEventListener('resize', syncMobilePaneToggle);
 
   // NDVI Legend is now embedded in the unified layer control panel.
   // Keep a stub `legend` object with addTo() so existing calls don't break.
   const legend = { addTo: function () { return this; } };
 
-  // Show NDVI scale section in the layer panel when NDVI is loaded
+  // Show NDVI legend panel (desktop: fixed overlay; mobile: inside layer panel)
   function showLegendInPanel() {
+    var dl = document.getElementById('desktop-legend');
+    if (dl) dl.classList.remove('hidden');
+    // Update title to current VI name
+    var title = document.getElementById('desktop-legend-title');
+    if (title) title.textContent = state.selectedVI || 'NDVI';
+    // Mobile fallback: also show sections inside ULC panel if present
     document.querySelectorAll('.ulc-ndvi-section').forEach(function (el) {
       el.style.display = '';
     });
@@ -487,6 +547,98 @@
     if (file) handleFileUpload(file);
   });
 
+  async function rebuildGeoRasterAtResolution(maxDim) {
+    if (!state.tiff || !state.tiffImage) throw new Error('Geen GeoTIFF geladen.');
+
+    var tiff = state.tiff;
+    var image = state.tiffImage;
+    var imageCount = await tiff.getImageCount();
+    var nBands = image.getSamplesPerPixel();
+    var bbox = image.getBoundingBox();
+    var noDataVal = image.getGDALNoData();
+    noDataVal = (noDataVal !== null && noDataVal !== undefined) ? parseFloat(noDataVal) : null;
+    if (noDataVal !== null && isNaN(noDataVal)) noDataVal = null;
+
+    var readImage = image;
+    if (imageCount > 1) {
+      var candidates = [];
+      for (var oi = 1; oi < imageCount; oi++) {
+        var ov = await tiff.getImage(oi);
+        candidates.push({ idx: oi, w: ov.getWidth(), img: ov });
+      }
+      candidates.sort(function (a, b) { return a.w - b.w; });
+      for (var ci = 0; ci < candidates.length; ci++) {
+        if (candidates[ci].w >= maxDim) {
+          readImage = candidates[ci].img;
+          break;
+        }
+      }
+    }
+
+    var rw = readImage.getWidth(), rh = readImage.getHeight();
+    var scale = Math.max(rw / maxDim, rh / maxDim, 1);
+    var tw = Math.ceil(rw / scale), th = Math.ceil(rh / scale);
+    console.log('[Resolutie] slider=' + maxDim + ' overview=' + rw + 'x' + rh + ' output=' + tw + 'x' + th + ' scale=' + scale.toFixed(2));
+
+    loadingText.textContent = 'Banden laden (' + tw + '×' + th + ' px)…';
+
+    var rasters = await readImage.readRasters({
+      interleave: false,
+      width: tw,
+      height: th,
+      resampleMethod: 'bilinear'
+    });
+
+    var bandMetas = state.bandMetas || [];
+    var isFloat = bandMetas.length > 0 && bandMetas[0].sampleFormat === 3;
+    var noDataEps = (isFloat && noDataVal !== null) ? 1e-6 : 0;
+    function isNoData(v) {
+      if (v === null || isNaN(v)) return true;
+      if (noDataVal === null) return false;
+      return noDataEps > 0 ? Math.abs(v - noDataVal) < noDataEps : v === noDataVal;
+    }
+
+    var values = [], mins = [], maxs = [];
+    for (var b = 0; b < nBands; b++) {
+      var flat = rasters[b];
+      var rows = [];
+      var bMin = Infinity, bMax = -Infinity;
+      for (var r = 0; r < th; r++) {
+        var row = Array.from(flat.subarray ? flat.subarray(r * tw, (r + 1) * tw) : flat.slice(r * tw, (r + 1) * tw));
+        rows.push(row);
+        for (var c = 0; c < tw; c++) {
+          var v = row[c];
+          if (!isNoData(v)) {
+            if (v < bMin) bMin = v;
+            if (v > bMax) bMax = v;
+          }
+        }
+      }
+      values.push(rows);
+      mins.push(bMin === Infinity ? 0 : bMin);
+      maxs.push(bMax === -Infinity ? 1 : bMax);
+    }
+
+    state.georaster = {
+      width: tw,
+      height: th,
+      numberOfRasters: nBands,
+      xmin: bbox[0],
+      ymin: bbox[1],
+      xmax: bbox[2],
+      ymax: bbox[3],
+      pixelWidth: (bbox[2] - bbox[0]) / tw,
+      pixelHeight: (bbox[3] - bbox[1]) / th,
+      noDataValue: noDataVal,
+      projection: image.geoKeys ? (image.geoKeys.ProjectedCSTypeGeoKey || image.geoKeys.GeographicTypeGeoKey || null) : null,
+      values: values,
+      mins: mins,
+      maxs: maxs,
+    };
+
+    return { width: tw, height: th };
+  }
+
   async function handleFileUpload(file) {
     if (state.blobUrl) { URL.revokeObjectURL(state.blobUrl); state.blobUrl = null; }
 
@@ -601,85 +753,9 @@
       state.tiffImage   = image;
       state.geotiffEPSG = epsg;
 
-      // Step 2: pick best overview for target resolution
-      var readImage = image;
-      var resSlider = $('#resolution-slider');
-      var MAX_DIM = resSlider ? parseInt(resSlider.value) || 1024 : 1024;
-      if (imageCount > 1) {
-        // Walk overviews from smallest to largest; pick the smallest that is >= MAX_DIM.
-        // If none are large enough, fall back to the full-resolution image (index 0).
-        var candidates = [];
-        for (var oi = 1; oi < imageCount; oi++) {
-          var ov = await tiff.getImage(oi);
-          candidates.push({ idx: oi, w: ov.getWidth(), img: ov });
-        }
-        candidates.sort(function (a, b) { return a.w - b.w; }); // ascending by width
-        for (var ci = 0; ci < candidates.length; ci++) {
-          if (candidates[ci].w >= MAX_DIM) {
-            readImage = candidates[ci].img;
-            break;
-          }
-        }
-        // If no overview is large enough, readImage stays as the full-res image (index 0)
-      }
-      var rw = readImage.getWidth(), rh = readImage.getHeight();
-      var scale = Math.max(rw / MAX_DIM, rh / MAX_DIM, 1);
-      var tw = Math.ceil(rw / scale), th = Math.ceil(rh / scale);
-      console.log('[Resolutie] slider=' + MAX_DIM + ' overview=' + rw + 'x' + rh + ' output=' + tw + 'x' + th + ' scale=' + scale.toFixed(2));
-
-      loadingText.textContent = 'Banden laden (' + tw + '\xd7' + th + ' px)\u2026';
-
-      // Step 3: read rasters at target resolution
-      // For COG (WebODM default), this only fetches the overview tiles — very fast
-      var rasters = await readImage.readRasters({
-        interleave: false,
-        width: tw, height: th,
-        resampleMethod: 'bilinear'
-      });
-
-      // Step 4: build georaster-compatible object
-      // For float32 bands (sampleFormat=3), noData=0 from ODM — use epsilon check to avoid
-      // excluding valid low-reflectance pixels; for uint16 use strict equality.
-      var isFloat = bandMetas.length > 0 && bandMetas[0].sampleFormat === 3;
-      var noDataEps = (isFloat && noDataVal !== null) ? 1e-6 : 0;
-      function isNoData(v) {
-        if (v === null || isNaN(v)) return true;
-        if (noDataVal === null) return false;
-        return noDataEps > 0 ? Math.abs(v - noDataVal) < noDataEps : v === noDataVal;
-      }
-
-      var values = [], mins = [], maxs = [];
-      for (var b = 0; b < nBands; b++) {
-        var flat = rasters[b];
-        var rows = [];
-        var bMin = Infinity, bMax = -Infinity;
-        for (var r = 0; r < th; r++) {
-          var row = Array.from(flat.subarray ? flat.subarray(r * tw, (r + 1) * tw) : flat.slice(r * tw, (r + 1) * tw));
-          rows.push(row);
-          for (var c = 0; c < tw; c++) {
-            var v = row[c];
-            if (!isNoData(v)) {
-              if (v < bMin) bMin = v;
-              if (v > bMax) bMax = v;
-            }
-          }
-        }
-        values.push(rows);
-        mins.push(bMin === Infinity  ? 0 : bMin);
-        maxs.push(bMax === -Infinity ? 1 : bMax);
-      }
-
-      state.georaster = {
-        width: tw, height: th,
-        numberOfRasters: nBands,
-        xmin: bbox[0], ymin: bbox[1], xmax: bbox[2], ymax: bbox[3],
-        pixelWidth:  (bbox[2] - bbox[0]) / tw,
-        pixelHeight: (bbox[3] - bbox[1]) / th,
-        noDataValue: noDataVal,
-        projection:  epsgCode,   // numeric EPSG code
-        values: values,
-        mins: mins, maxs: maxs,
-      };
+      var rasterInfo = await rebuildGeoRasterAtResolution(getRequestedResolution());
+      var tw = rasterInfo.width;
+      var th = rasterInfo.height;
 
       // Show file info
       $('#info-filename').textContent = file.name;
@@ -1279,6 +1355,7 @@
 
       // Display
       brpOverlay.clearLayers();
+      state.brpLayerMap = {}; // feature id/key → leaflet layer (for style updates)
       state.brpLayer = L.geoJSON(data, {
         style: function () {
           return {
@@ -1290,13 +1367,21 @@
           };
         },
         onEachFeature: function (feature, layer) {
+          // Store layer ref for programmatic style updates on selection
+          var fkey = feature.id || JSON.stringify(feature.geometry).slice(0, 80);
+          if (state.brpLayerMap) state.brpLayerMap[fkey] = { layer: layer, feature: feature };
           layer.on('mouseover', function () {
+            if (isParcelSelected(feature)) return; // keep selected style
             layer.setStyle({ fillOpacity: 0.18, weight: 4 });
           });
           layer.on('mouseout', function () {
-            layer.setStyle({ fillOpacity: 0.06, weight: 3 });
+            if (isParcelSelected(feature)) {
+              layer.setStyle({ color: '#00E5FF', fillColor: '#00E5FF', fillOpacity: 0.25, weight: 4 });
+            } else {
+              layer.setStyle({ color: '#FFE000', fillColor: null, fillOpacity: 0.06, weight: 3 });
+            }
           });
-        layer.on('click', function (ev) {
+          layer.on('click', function (ev) {
             L.DomEvent.stopPropagation(ev);
             toggleParcel(feature);
           });
@@ -1321,6 +1406,18 @@
     });
   }
 
+  // Update BRP layer visual styles to reflect current selection state
+  function refreshBRPLayerStyles() {
+    if (!state.brpLayerMap) return;
+    Object.values(state.brpLayerMap).forEach(function (entry) {
+      if (isParcelSelected(entry.feature)) {
+        entry.layer.setStyle({ color: '#00E5FF', fillColor: '#00E5FF', fillOpacity: 0.25, weight: 4 });
+      } else {
+        entry.layer.setStyle({ color: '#FFE000', fillColor: null, fillOpacity: 0.06, weight: 3 });
+      }
+    });
+  }
+
   function toggleParcel(feature) {
     var idx = -1;
     for (var i = 0; i < state.selectedParcels.length; i++) {
@@ -1337,6 +1434,8 @@
       state.selectedParcels.push(feature);
       toast('Perceel toegevoegd! (' + state.selectedParcels.length + ' geselecteerd)');
     }
+    // Immediately update the BRP layer style for this feature
+    refreshBRPLayerStyles();
     updateSelectionDisplay(wasEmpty && state.selectedParcels.length > 0);
   }
 
@@ -1554,6 +1653,7 @@
       listEl.querySelectorAll('.remove-parcel').forEach(function (btn) {
         btn.addEventListener('click', function () {
           state.selectedParcels.splice(parseInt(btn.dataset.i), 1);
+          refreshBRPLayerStyles();
           updateSelectionDisplay(false);
         });
       });
@@ -1627,6 +1727,7 @@
   if (clearParcelsBtn) {
     clearParcelsBtn.addEventListener('click', function () {
       state.selectedParcels = [];
+      refreshBRPLayerStyles();
       updateSelectionDisplay(false);
       toast('Selectie gewist.');
     });
@@ -2413,6 +2514,15 @@
   // ==========================================
   renderClasses();
   activateStep(1);
+
+  [resolutionSlider, gridSlider, gridAngleSlider].forEach(function (slider) {
+    if (!slider) return;
+    ['pointerdown', 'mousedown', 'touchstart', 'click'].forEach(function (eventName) {
+      slider.addEventListener(eventName, function (e) {
+        e.stopPropagation();
+      });
+    });
+  });
 
   // Mobile sidebar toggle
   (function () {

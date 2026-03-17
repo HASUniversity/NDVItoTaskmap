@@ -350,14 +350,40 @@ select:focus, input[type="text"]:focus, input[type="number"]:focus {
 input[type="range"] {
   flex: 1;
   -webkit-appearance: none;
+  appearance: none;
   height: 4px;
   background: var(--border);
   border-radius: 2px;
   outline: none;
+  touch-action: pan-x;
+  pointer-events: auto;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
 }
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  border: 2px solid white;
+  box-shadow: var(--shadow);
+  margin-top: -7px;
+}
+
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+}
+
+input[type="range"]::-moz-range-thumb {
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -798,6 +824,36 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: var(--shadow) !important;
 }
 
+/* ---------- Desktop NDVI legend (always visible, bottom-left of map) ---------- */
+.desktop-legend {
+  position: absolute;
+  bottom: 30px;
+  left: 12px;
+  z-index: 900;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 8px 12px 6px;
+  min-width: 160px;
+  pointer-events: none;
+}
+.desktop-legend.hidden {
+  display: none;
+}
+.desktop-legend-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+/* On mobile: hide the fixed legend (it's not needed there) */
+@media (max-width: 768px) {
+  .desktop-legend { display: none !important; }
+}
+
 /* ---------- Unified layer control ---------- */
 .ulc-wrap {
   position: relative;
@@ -850,6 +906,26 @@ input[type="range"]::-webkit-slider-thumb {
 }
 .ulc-panel.hidden {
   display: none;
+}
+
+/* On desktop: panel always visible, no toggle button */
+@media (min-width: 769px) {
+  .ulc-toggle {
+    display: none;
+  }
+  .ulc-panel {
+    position: relative;
+    bottom: auto;
+    right: auto;
+  }
+  /* Override .hidden so the panel is always shown on desktop */
+  .ulc-panel.hidden {
+    display: flex;
+  }
+
+  #mobile-toggle {
+    display: none !important;
+  }
 }
 
 .ulc-section-title {

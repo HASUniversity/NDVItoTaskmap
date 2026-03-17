@@ -6,7 +6,7 @@
   <title>Taakkaart Generator</title>
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🌾</text></svg>" />
   <link rel="stylesheet" href="static/vendor/leaflet.css" />
-  <link rel="stylesheet" href="static/styles.css" />
+  <link rel="stylesheet" href="static/styles.css?v=21" />
 </head>
 <body>
   <div class="app">
@@ -230,6 +230,12 @@
       </div>
       <!-- Status toast -->
       <div id="toast" class="toast hidden"></div>
+      <!-- NDVI legend — always visible on desktop, hidden on mobile -->
+      <div id="desktop-legend" class="desktop-legend hidden">
+        <div class="desktop-legend-title" id="desktop-legend-title">NDVI</div>
+        <div class="legend-gradient"></div>
+        <div class="legend-labels" id="legend-labels"><span>laag</span><span></span><span>hoog</span></div>
+      </div>
     </main>
   </div>
 
@@ -245,6 +251,6 @@
   <script src="static/vendor/turf.min.js"></script>
   <script src="static/vendor/geotiff.js"></script>
   <!-- App -->
-  <script src="static/app.js?v=18"></script>
+  <script src="static/app.js?v=21"></script>
 </body>
 </html>
