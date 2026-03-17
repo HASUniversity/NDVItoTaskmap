@@ -53,6 +53,7 @@
     isPreCalc: false,
     brpLoading: false,
     ndviHistogramData: null,
+    ndviGrid: null,         // Float32Array of NDVI values (full raster)
   };
 
   // ==========================================
@@ -496,8 +497,16 @@
       var fullH     = image.getHeight();
       // Detect alpha channel(s) so they are excluded from band selectors
       var fd = image.fileDirectory || {};
-      var extraSamples = fd.ExtraSamples;
-      if (!Array.isArray(extraSamples)) extraSamples = (extraSamples != null) ? [extraSamples] : [];
+      var extraSamplesRaw = fd.ExtraSamples;
+      var extraSamples = [];
+      if (Array.isArray(extraSamplesRaw)) {
+        extraSamples = extraSamplesRaw;
+      } else if (extraSamplesRaw != null && typeof extraSamplesRaw === 'object') {
+        var esKeys = Object.keys(extraSamplesRaw).sort(function(a,b){return Number(a)-Number(b);});
+        extraSamples = esKeys.map(function(k) { return extraSamplesRaw[k]; });
+      } else if (extraSamplesRaw != null) {
+        extraSamples = [extraSamplesRaw];
+      }
       var nAlpha = extraSamples.filter(function(s) { return s === 1 || s === 2; }).length;
       var nDataBands = Math.max(1, nBands - nAlpha);
       var noDataVal = image.getGDALNoData();
@@ -505,17 +514,50 @@
       if (noDataVal !== null && isNaN(noDataVal)) noDataVal = null; // 'nan' GDAL tag → treat as unset
 
       // Read per-band GDAL metadata (wavelength + name) — used for smart band auto-detection
+      // Pre-parse <Item> elements from raw GDAL_METADATA XML (WebODM/ODM writes
+      // DESCRIPTION per sample here, which geotiff.js getGDALMetadata() may miss)
+      var rawGDALMeta = fd.GDAL_METADATA || '';
+      var xmlItemsByBand = {};
+      if (rawGDALMeta) {
+        var reXml = /<Item\b([^>]*)>([\s\S]*?)<\/Item>/gi, xm;
+        while ((xm = reXml.exec(rawGDALMeta)) !== null) {
+          var xAttrs = xm[1], xVal = xm[2].trim();
+          var xName = xAttrs.match(/name\s*=\s*["']([^"']+)["']/i);
+          var xSamp = xAttrs.match(/sample\s*=\s*["'](\d+)["']/i);
+          if (xName) {
+            var xIdx = xSamp ? parseInt(xSamp[1]) : -1;
+            if (!xmlItemsByBand[xIdx]) xmlItemsByBand[xIdx] = {};
+            xmlItemsByBand[xIdx][xName[1].toLowerCase()] = xVal;
+          }
+        }
+      }
+      console.log('[GDAL_METADATA raw]', rawGDALMeta || '(geen)');
+      console.log('[GDAL XML parsed]', JSON.stringify(xmlItemsByBand));
+
       var bandMetas = [];
       for (var bi = 0; bi < nBands; bi++) {
         var bmeta = image.getGDALMetadata(bi) || {};
-        // normalize keys to lowercase for robustness
         var bmetaLC = {};
         for (var k in bmeta) if (bmeta.hasOwnProperty(k)) bmetaLC[k.toLowerCase()] = bmeta[k];
-        var wl = parseFloat(bmetaLC.wavelength || bmetaLC.central_wavelength || '0') || 0;
-        var bname = (bmetaLC.band_name || bmetaLC.bandname || bmetaLC.name || '').trim();
+        // Merge XML-parsed per-band items (fill gaps geotiff.js missed)
+        var xmlBand = xmlItemsByBand[bi] || {};
+        for (var xk in xmlBand) if (xmlBand.hasOwnProperty(xk) && !bmetaLC[xk]) bmetaLC[xk] = xmlBand[xk];
+        var wl = parseFloat(
+          bmetaLC.wavelength || bmetaLC.central_wavelength ||
+          bmetaLC['center wavelength'] || bmetaLC.cwl || '0'
+        ) || 0;
+        var bname = (
+          bmetaLC.description || bmetaLC['band name'] || bmetaLC.band_name ||
+          bmetaLC.bandname || bmetaLC.name || ''
+        ).trim();
+        if (wl === 0 && bname) {
+          var wlM = bname.match(/(\d{3,4})\s*nm/i);
+          if (wlM) wl = parseFloat(wlM[1]) || 0;
+        }
         bandMetas.push({ wavelength: wl, name: bname, sampleFormat: image.getSampleFormat(bi), bitsPerSample: image.getBitsPerSample(bi) });
       }
       state.bandMetas = bandMetas;
+      console.log('[Band metadata]', bandMetas.map(function(m,i){return 'B'+(i+1)+' "'+m.name+'" wl='+m.wavelength;}).join(' | '));
 
       // Smart auto-detect Red (620-700nm) and NIR (780-960nm) by wavelength or name
       // ODM names for DJI Mavic Multispectral: 'Red','Nir','Rededge','Blue','Green'
@@ -651,9 +693,9 @@
         state.isPreCalc = false;
         // Use wavelength-based detection first; fall back to position-based defaults
         // Fallback positions for 5-band alphabetical ODM order: B(0),G(1),NIR(2),R(3),RE(4)
-        state.bandRed = pickBand(620, 700, /^red$/i,
+        state.bandRed = pickBand(620, 700, /\bred\b(?!.?edge)/i,
           [nDataBands >= 5 ? 3 : (nDataBands >= 4 ? 2 : 0)]);
-        state.bandNIR = pickBand(780, 960, /nir|near.?ir|near.?infra/i,
+        state.bandNIR = pickBand(780, 960, /\bnir\b|near.?ir|near.?infra/i,
           [nDataBands >= 5 ? 2 : (nDataBands >= 4 ? 3 : nDataBands - 1)]);
         // If wavelength/name were both absent → use value-range heuristic:
         // NIR band typically has the highest mean reflectance
@@ -840,12 +882,16 @@
       var px = imgData.data;
       var hasAlpha = gr.numberOfRasters >= 4;
 
-      // Compute proxy-NDVI histogram from RGB values: pNDVI = (G-R)/(G+R)
+      // Compute proxy-NDVI from RGB values: pNDVI = (G-R)/(G+R)
+      // Also build ndviGrid so parcel clipping works in RGB proxy mode
+      var proxyGrid = new Float32Array(gr.width * gr.height);
+      proxyGrid.fill(NaN);
       var HIST_BINS_P = 100, histBinMinP = -0.2, histBinMaxP = 1.0;
       var histCountsP = new Float32Array(HIST_BINS_P);
       for (var row = 0; row < gr.height; row++) {
         for (var col = 0; col < gr.width; col++) {
-          var idx = (row * gr.width + col) << 2;
+          var oi = row * gr.width + col;
+          var idx = oi << 2;
           var rv = gr.values[0][row][col];
           var gv = gr.values[1][row][col];
           var bv = gr.values[2][row][col];
@@ -858,12 +904,16 @@
           var sum = gv + rv;
           if (sum > 0) {
             var pndvi = (gv - rv) / sum;
+            proxyGrid[oi] = pndvi;
             var bip = Math.floor((pndvi - histBinMinP) / (histBinMaxP - histBinMinP) * HIST_BINS_P);
             histCountsP[Math.max(0, Math.min(HIST_BINS_P - 1, bip))]++;
           }
         }
       }
+      state.ndviGrid = proxyGrid;
       state.ndviHistogramData = { counts: histCountsP, min: histBinMinP, max: histBinMaxP };
+      state.ndviScaleMin = histBinMinP;
+      state.ndviScaleMax = histBinMaxP;
 
       ctx.putImageData(imgData, 0, 0);
       state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
@@ -911,8 +961,10 @@
           var rv = gr.values[bR][row][col];
           var nv = gr.values[bN][row][col];
           if (nd(rv) || nd(nv)) continue;
-          if ((rv + nv) === 0) continue;
-          ndvi = (nv - rv) / (nv + rv);
+          var s = nv + rv;
+          if (s === 0) continue;
+          ndvi = (nv - rv) / s;
+          if (ndvi < -1 || ndvi > 1) continue; // skip extreme outliers
         }
         ndviGrid[row * gr.width + col] = ndvi;
         if (ndvi < ndviMin) ndviMin = ndvi;
@@ -920,28 +972,43 @@
         ndviCount++;
       }
     }
+    // Store full-raster ndviGrid for parcel clipping later
+    state.ndviGrid = ndviGrid;
 
-    // Compute NDVI histogram (100 bins, -0.2..1.0) for step-4 display
-    var HIST_BINS = 100, histBinMin = -0.2, histBinMax = 1.0;
+    // Determine color scale range FIRST, then build histogram with same range.
+    // Also store the scale in state so clipNDVIToParcel reuses the same scale.
+    // When stretch=on: 2nd-98th percentile (same as WebODM raster_utils.py).
+    // When stretch=off: fixed agronomic range [-0.2, 1.0].
+    var scaleMin = -0.2, scaleMax = 1.0;
+    if (stretch && ndviCount > 0) {
+      var sortedVals = [];
+      for (var si = 0; si < ndviGrid.length; si++) {
+        if (!isNaN(ndviGrid[si])) sortedVals.push(ndviGrid[si]);
+      }
+      sortedVals.sort(function(a, b) { return a - b; });
+      var p2  = sortedVals[Math.max(0, Math.floor(sortedVals.length * 0.02))];
+      var p98 = sortedVals[Math.min(sortedVals.length - 1, Math.floor(sortedVals.length * 0.98))];
+      var margin = Math.max(0.01, (p98 - p2) * 0.02);
+      scaleMin = Math.max(-1, p2  - margin);
+      scaleMax = Math.min( 1, p98 + margin);
+      if (scaleMax <= scaleMin) scaleMax = scaleMin + 0.01;
+      console.log('[Stretch] p2=' + p2.toFixed(3) + ' p98=' + p98.toFixed(3) +
+                  ' scale=' + scaleMin.toFixed(3) + '..' + scaleMax.toFixed(3));
+    }
+
+    // Build histogram using the same range as the colour scale
+    var HIST_BINS = 100;
     var histCounts = new Float32Array(HIST_BINS);
     for (var hi = 0; hi < ndviGrid.length; hi++) {
       var hv = ndviGrid[hi];
       if (!isNaN(hv)) {
-        var bi = Math.floor((hv - histBinMin) / (histBinMax - histBinMin) * HIST_BINS);
+        var bi = Math.floor((hv - scaleMin) / (scaleMax - scaleMin) * HIST_BINS);
         histCounts[Math.max(0, Math.min(HIST_BINS - 1, bi))]++;
       }
     }
-    state.ndviHistogramData = { counts: histCounts, min: histBinMin, max: histBinMax };
-
-    // Determine color scale range
-    var scaleMin = -0.2, scaleMax = 1.0;
-    if (stretch && ndviCount > 0) {
-      // Clamp to -1..1, add 5% margin so edges aren't clipped
-      var margin = Math.max(0.02, (ndviMax - ndviMin) * 0.05);
-      scaleMin = Math.max(-1, ndviMin - margin);
-      scaleMax = Math.min(1, ndviMax + margin);
-      if (scaleMax <= scaleMin) scaleMax = scaleMin + 0.01;
-    }
+    state.ndviHistogramData = { counts: histCounts, min: scaleMin, max: scaleMax };
+    state.ndviScaleMin = scaleMin;
+    state.ndviScaleMax = scaleMax;
 
     // Second pass: render
     for (var row = 0; row < gr.height; row++) {
@@ -1200,12 +1267,184 @@
     updateSelectionDisplay(wasEmpty && state.selectedParcels.length > 0);
   }
 
+  /**
+   * Clip/restore NDVI overlay and histogram to selected parcels.
+   * @param {Array|null} parcels - array of GeoJSON features, or null to restore full raster
+   */
+  function clipNDVIToParcel(parcels) {
+    var gr = state.georaster;
+    var ndviGrid = state.ndviGrid;
+    if (!gr || !ndviGrid) {
+      console.warn('[Clip] Afgebroken: gr=' + !!gr + ' ndviGrid=' + !!ndviGrid);
+      return;
+    }
+    var epsg = state.geotiffEPSG;
+    var stretch = stretchCheck && stretchCheck.checked;
+    console.log('[Clip] Start: parcels=' + (parcels ? parcels.length : 'null') + ' epsg=' + epsg + ' raster=' + gr.width + 'x' + gr.height + ' stretch=' + stretch);
+
+    var w = gr.width, h = gr.height;
+    var mask = new Uint8Array(w * h); // 0 = outside, 1 = inside
+
+    if (!parcels) {
+      // No clipping — all valid pixels
+      for (var mi = 0; mi < mask.length; mi++) mask[mi] = 1;
+    } else {
+      // Convert parcel polygons to raster pixel coordinates, then use a
+      // canvas fill to rasterize them — orders of magnitude faster than
+      // per-pixel point-in-polygon with proj4 reprojection.
+      var maskCanvas = document.createElement('canvas');
+      maskCanvas.width = w; maskCanvas.height = h;
+      var mctx = maskCanvas.getContext('2d');
+      mctx.fillStyle = '#fff';
+
+      for (var pi = 0; pi < parcels.length; pi++) {
+        var geom = parcels[pi].geometry || parcels[pi];
+        var rings = [];
+        if (geom.type === 'Polygon') {
+          rings = geom.coordinates;
+        } else if (geom.type === 'MultiPolygon') {
+          for (var mp = 0; mp < geom.coordinates.length; mp++)
+            rings = rings.concat(geom.coordinates[mp]);
+        } else continue;
+
+        for (var ri2 = 0; ri2 < rings.length; ri2++) {
+          var ring = rings[ri2];
+          if (ring.length < 3) continue;
+          mctx.beginPath();
+          for (var vi2 = 0; vi2 < ring.length; vi2++) {
+            // ring coords are [lon, lat] in WGS84 — convert to raster pixel coords
+            var cx = ring[vi2][0], cy = ring[vi2][1];
+            if (epsg && epsg !== 'EPSG:4326') {
+              try {
+                var pp = proj4('EPSG:4326', epsg, [cx, cy]);
+                cx = pp[0]; cy = pp[1];
+              } catch (e) { continue; }
+            }
+            var pc = (cx - gr.xmin) / gr.pixelWidth;
+            var pr = (gr.ymax - cy) / Math.abs(gr.pixelHeight);
+            if (vi2 === 0) mctx.moveTo(pc, pr);
+            else mctx.lineTo(pc, pr);
+          }
+          mctx.closePath();
+          // First ring = outer boundary (fill), holes would need 'evenodd'
+          if (ri2 === 0 || rings.length === 1) mctx.fill();
+          else mctx.fill('evenodd');
+        }
+      }
+
+      // Read back the mask
+      var mdata = mctx.getImageData(0, 0, w, h).data;
+      for (var mi2 = 0; mi2 < mask.length; mi2++) {
+        // Any non-zero red channel means inside
+        if (mdata[mi2 << 2] > 0) mask[mi2] = 1;
+      }
+      var maskedCount = 0;
+      for (var mc = 0; mc < mask.length; mc++) if (mask[mc]) maskedCount++;
+      console.log('[Clip] masked pixels=' + maskedCount + ' / ' + mask.length);
+      if (maskedCount === 0) {
+        console.warn('[Clip] 0 masked pixels — polygon ligt waarschijnlijk buiten het raster');
+        toast('Perceel ligt buiten het rastergebied — kan niet knippen.', 'warn');
+        return;
+      }
+    }
+
+    // Collect NDVI values only for masked pixels
+    var vals = [];
+    for (var vi = 0; vi < ndviGrid.length; vi++) {
+      if (mask[vi] && !isNaN(ndviGrid[vi])) vals.push(ndviGrid[vi]);
+    }
+    console.log('[Clip] valid NDVI pixels in mask=' + vals.length);
+    if (vals.length === 0) {
+      toast('Geen geldige NDVI pixels in geselecteerd perceel.', 'warn');
+      return;
+    }
+
+    // Reuse the same scale as the full-raster view so colours stay consistent
+    var scaleMin = (state.ndviScaleMin != null) ? state.ndviScaleMin : -0.2;
+    var scaleMax = (state.ndviScaleMax != null) ? state.ndviScaleMax : 1.0;
+
+    // Build histogram using parcel-only data
+    var HIST_BINS = 100;
+    var histCounts = new Float32Array(HIST_BINS);
+    for (var hi = 0; hi < ndviGrid.length; hi++) {
+      if (!mask[hi]) continue;
+      var hv = ndviGrid[hi];
+      if (!isNaN(hv)) {
+        var bi = Math.floor((hv - scaleMin) / (scaleMax - scaleMin) * HIST_BINS);
+        histCounts[Math.max(0, Math.min(HIST_BINS - 1, bi))]++;
+      }
+    }
+    state.ndviHistogramData = { counts: histCounts, min: scaleMin, max: scaleMax };
+
+    // Re-render canvas clipped to parcels
+    var canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    var ctx = canvas.getContext('2d');
+    var imgData = ctx.createImageData(w, h);
+    var px = imgData.data;
+
+    if (state.isRGBProxy) {
+      // RGB proxy: show original RGB pixels, clipped to parcels
+      var hasAlphaP = gr.numberOfRasters >= 4;
+      for (var ri = 0; ri < h; ri++) {
+        for (var ci = 0; ci < w; ci++) {
+          var oi = ri * w + ci;
+          if (!mask[oi]) continue;
+          var av = hasAlphaP ? gr.values[3][ri][ci] : 255;
+          if (av === 0) continue;
+          var pi2 = oi << 2;
+          px[pi2]     = gr.values[0][ri][ci];
+          px[pi2 + 1] = gr.values[1][ri][ci];
+          px[pi2 + 2] = gr.values[2][ri][ci];
+          px[pi2 + 3] = Math.round(av * 0.85);
+        }
+      }
+    } else {
+      // NDVI colormap mode
+      for (var ri = 0; ri < h; ri++) {
+        for (var ci = 0; ci < w; ci++) {
+          var oi = ri * w + ci;
+          if (!mask[oi]) continue;
+          var nv = ndviGrid[oi];
+          if (isNaN(nv)) continue;
+          var rgb = ndviToRGB(nv, scaleMin, scaleMax);
+          if (!rgb) continue;
+          var pi2 = oi << 2;
+          px[pi2]     = rgb.r;
+          px[pi2 + 1] = rgb.g;
+          px[pi2 + 2] = rgb.b;
+          px[pi2 + 3] = 217;
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // Replace overlay
+    ndviOverlay.clearLayers();
+    state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
+    ndviOverlay.addLayer(state.ndviLayer);
+
+    // Update legend labels
+    setTimeout(function () {
+      var ll = document.getElementById('legend-labels');
+      if (ll) {
+        var mid = ((scaleMin + scaleMax) / 2).toFixed(2);
+        ll.innerHTML = '<span>' + scaleMin.toFixed(2) + '</span><span>' + mid + '</span><span>' + scaleMax.toFixed(2) + '</span>';
+      }
+    }, 50);
+
+    // Redraw histogram
+    drawNDVIHistogram();
+  }
+
   function updateSelectionDisplay(fitBounds) {
     selectionOverlay.clearLayers();
 
     if (state.selectedParcels.length === 0) {
       $('#parcel-info').classList.add('hidden');
       clearLegendCrop();
+      // Restore full-raster NDVI view
+      if (state.ndviGrid && state.georaster) clipNDVIToParcel(null);
       return;
     }
 
@@ -1254,6 +1493,8 @@
     $('#parcel-info').classList.remove('hidden');
     renderClasses();
     activateStep(4);
+    // Clip NDVI overlay + histogram to selected parcels
+    if (state.ndviGrid && state.georaster) clipNDVIToParcel(state.selectedParcels);
   }
 
   function computeArea(feature) {
@@ -1933,8 +2174,10 @@
           var rv = gr.values[state.bandRed][r] ? gr.values[state.bandRed][r][c] : undefined;
           var nv = gr.values[state.bandNIR][r] ? gr.values[state.bandNIR][r][c] : undefined;
           if (nd(rv) || nd(nv)) continue;
-          if ((rv + nv) === 0) continue;
-          ndvi = (nv - rv) / (nv + rv);
+          var ss = nv + rv;
+          if (ss === 0) continue;
+          ndvi = (nv - rv) / ss;
+          if (ndvi < -1 || ndvi > 1) continue;
         }
         if (!nd(ndvi)) {
           sum += ndvi;
