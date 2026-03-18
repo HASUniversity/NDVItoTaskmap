@@ -11,11 +11,11 @@
   const MIN_ZOOM_BRP = 14;
 
   const DEFAULT_CLASSES = [
-    { name: 'Zeer laag', min: -1.0, max: 0.25, rate: 150, color: '#d32f2f' },
-    { name: 'Laag',      min: 0.25, max: 0.40, rate: 120, color: '#f57c00' },
-    { name: 'Midden',    min: 0.40, max: 0.55, rate: 90,  color: '#fdd835' },
-    { name: 'Hoog',      min: 0.55, max: 0.70, rate: 60,  color: '#66bb6a' },
-    { name: 'Zeer hoog', min: 0.70, max: 1.00, rate: 30,  color: '#2e7d32' },
+    { name: t('clsVeryLow'), min: -1.0, max: 0.25, rate: 150, color: '#d32f2f' },
+    { name: t('clsLow'),     min: 0.25, max: 0.40, rate: 120, color: '#f57c00' },
+    { name: t('clsMid'),     min: 0.40, max: 0.55, rate: 90,  color: '#fdd835' },
+    { name: t('clsHigh'),    min: 0.55, max: 0.70, rate: 60,  color: '#66bb6a' },
+    { name: t('clsVeryHigh'),min: 0.70, max: 1.00, rate: 30,  color: '#2e7d32' },
   ];
 
   // Proj4 definitions
@@ -84,15 +84,15 @@
   async function reloadResolutionFromSlider() {
     if (!state.tiff || !state.tiffImage) return;
     var targetResolution = getRequestedResolution();
-    showLoading('GeoTIFF herladen op ' + targetResolution + ' px…');
+    showLoading(tf('loadingReload', targetResolution));
     resolutionSlider.disabled = true;
     try {
       await rebuildGeoRasterAtResolution(targetResolution);
       displayNDVI();
-      toast('Resolutie ingesteld op ' + targetResolution + ' px.');
+      toast(tf('toastResolutionSet', targetResolution));
     } catch (err) {
       console.error(err);
-      toast('Resolutie wijzigen mislukt: ' + err.message, true);
+      toast(tf('toastResolutionFail', err.message), true);
     } finally {
       resolutionSlider.disabled = false;
       hideLoading();
@@ -195,7 +195,7 @@
 
   function createLayerToggleButton(container, panel) {
     var toggleBtn = L.DomUtil.create('button', 'ulc-toggle', container);
-    toggleBtn.title = 'Lagen';
+    toggleBtn.title = t('lcLayers');
     toggleBtn.innerHTML =
       '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
       '<rect x="2" y="3" width="16" height="3" rx="1"/>' +
@@ -228,21 +228,21 @@
       // Panel
       var panel = L.DomUtil.create('div', 'ulc-panel hidden', div);
       panel.innerHTML =
-        '<div class="ulc-section-title">Achtergrond</div>' +
+        '<div class="ulc-section-title" data-i18n="lcBackground">Achtergrond</div>' +
         '<label class="ulc-radio"><input type="radio" name="basemap" value="Esri Satelliet" checked> Esri Satelliet</label>' +
         '<label class="ulc-radio"><input type="radio" name="basemap" value="PDOK Luchtfoto"> PDOK Luchtfoto</label>' +
         '<label class="ulc-radio"><input type="radio" name="basemap" value="OpenStreetMap"> OpenStreetMap</label>' +
         '<div class="ulc-sep"></div>' +
-        '<div class="ulc-section-title">Lagen</div>' +
+        '<div class="ulc-section-title" data-i18n="lcLayers">Lagen</div>' +
         '<label class="ulc-check"><input type="checkbox" data-layer="ndvi" checked> \uD83C\uDF3F NDVI</label>' +
-        '<label class="ulc-check"><input type="checkbox" data-layer="taakkaart"> \uD83D\uDCCB Taakkaart</label>' +
-        '<label class="ulc-check"><input type="checkbox" data-layer="percelen" checked> \uD83D\uDFE1 Percelen</label>' +
-        '<label class="ulc-check"><input type="checkbox" data-layer="selectie" checked> \u2705 Selectie</label>' +
+        '<label class="ulc-check"><input type="checkbox" data-layer="taakkaart"> <span data-i18n="lcTaskmap">\uD83D\uDCCB Taakkaart</span></label>' +
+        '<label class="ulc-check"><input type="checkbox" data-layer="percelen" checked> <span data-i18n="lcParcels">\uD83D\uDFE1 Percelen</span></label>' +
+        '<label class="ulc-check"><input type="checkbox" data-layer="selectie" checked> <span data-i18n="lcSelection">\u2705 Selectie</span></label>' +
         '<div class="ulc-sep ulc-ndvi-section" style="display:none"></div>' +
         '<div class="ulc-ndvi-section" style="display:none">' +
           '<div class="ulc-section-title" id="mobile-legend-title">NDVI</div>' +
           '<div class="legend-gradient"></div>' +
-          '<div class="legend-labels" id="mobile-legend-labels"><span>laag</span><span></span><span>hoog</span></div>' +
+          '<div class="legend-labels" id="mobile-legend-labels"><span data-i18n="legendLow">' + t('legendLow') + '</span><span></span><span data-i18n="legendHigh">' + t('legendHigh') + '</span></div>' +
         '</div>' +
         '<div id="legend-parcel" style="display:none">' +
           '<div class="legend-parcel-sep"></div>' +
@@ -405,7 +405,7 @@
   }
 
   function showLoading(text) {
-    loadingText.textContent = text || 'Laden...';
+    loadingText.textContent = text || t('loading');
     loadingOverlay.classList.remove('hidden');
   }
 
@@ -614,7 +614,7 @@
     var tw = Math.ceil(rw / scale), th = Math.ceil(rh / scale);
     console.log('[Resolutie] slider=' + maxDim + ' overview=' + rw + 'x' + rh + ' output=' + tw + 'x' + th + ' scale=' + scale.toFixed(2));
 
-    loadingText.textContent = 'Banden laden (' + tw + '×' + th + ' px)…';
+    loadingText.textContent = tf('loadingBands', tw, th);
 
     var rasters = await readImage.readRasters({
       interleave: false,
@@ -676,7 +676,7 @@
   async function handleFileUpload(file) {
     if (state.blobUrl) { URL.revokeObjectURL(state.blobUrl); state.blobUrl = null; }
 
-    showLoading('GeoTIFF metadata lezen…');
+    showLoading(t('loadingGeoTIFF'));
     try {
       var GTIFF = window.GeoTIFF;
       if (!GTIFF) throw new Error('geotiff.js niet geladen — herlaad de pagina.');
@@ -800,9 +800,9 @@
       if (nDataBands === 1) {
         state.isPreCalc = true;
         state.isRGBProxy = false;
-        $('#info-mode').textContent = 'Pre-berekende NDVI (1 band)';
+        $('#info-mode').textContent = t('modePrecalcNDVI');
         hideLoading();
-        toast('Pre-berekende NDVI gedetecteerd.');
+        toast(t('toastNDVIDetected'));
         displayNDVI();
         zoomToGeoTIFF();
         activateStep(3);
@@ -813,14 +813,14 @@
         state.isPreCalc = false;
         state.bandRed = 0; // R channel
         state.bandNIR = 1; // G channel (used only for proxy NDVI in sampleNDVI)
-        var ovNote2 = tw < fullW ? ' (geladen als ' + tw + '\xd7' + th + ' px)' : '';
-        $('#info-mode').textContent = 'RGB kleurenkaart (Plant Health export)' + ovNote2;
+        var ovNote2 = tw < fullW ? tf('loadedAs', tw, th) : '';
+        $('#info-mode').textContent = t('modeRGBMap') + ovNote2;
         $('#band-info-row').classList.add('hidden');
         // Populate band selectors so user can override RGB proxy detection
         populateBandSelectors(nDataBands);
-        $('#band-desc').textContent = 'RGB kleurenkaart gedetecteerd. Klik hieronder op \u201cBereken NDVI\u201d om handmatig Red en NIR banden te kiezen als de detectie niet klopt.';
+        $('#band-desc').textContent = t('bandDescRGB');
         hideLoading();
-        toast('RGB Plant Health kaart gedetecteerd — wordt direct weergegeven.');
+        toast(t('toastRGBDetected'));
         displayNDVI();
         zoomToGeoTIFF();
         activateStep(3);
@@ -895,18 +895,18 @@
           $('#band-info-row').classList.remove('hidden');
         }
 
-        var ovNote = tw < fullW ? ' (geladen als ' + tw + '\xd7' + th + ' px)' : '';
-        $('#info-mode').textContent = nDataBands + ' banden' + ovNote;
+        var ovNote = tw < fullW ? tf('loadedAs', tw, th) : '';
+        $('#info-mode').textContent = tf('modeBands', nDataBands) + ovNote;
         populateBandSelectors(nDataBands);
-        $('#band-desc').textContent = 'Selecteer de Red en NIR banden voor NDVI-berekening.';
+        $('#band-desc').textContent = t('bandDescMulti');
         hideLoading();
-        toast('GeoTIFF geladen. Controleer de banden.');
+        toast(t('toastGeoTIFFLoaded'));
         activateStep(2);
       }
     } catch (err) {
       hideLoading();
       console.error(err);
-      toast('Fout bij laden: ' + err.message, true);
+      toast(tf('toastLoadError', err.message), true);
     }
   }
 
@@ -992,15 +992,15 @@
     var bandA = state.bandNIR;
     var bandB = vi === 'GNDVI' ? state.bandGreen : vi === 'NDRE' ? state.bandRedEdge : state.bandRed;
     if (bandA === bandB) {
-      toast('De twee gebruikte banden mogen niet dezelfde zijn.', true);
+      toast(t('toastSameBands'), true);
       return;
     }
-    showLoading(vi + ' berekenen...');
+    showLoading(tf('loadingVI', vi));
     setTimeout(function () {
       displayNDVI();
       zoomToGeoTIFF();
       hideLoading();
-      toast(state.selectedVI + ' berekend en weergegeven.');
+      toast(tf('toastVIComputed', state.selectedVI));
       activateStep(3);
       startBRPLoading();
     }, 50);
@@ -1218,7 +1218,7 @@
       if (statsRow) statsRow.classList.remove('hidden');
     } else {
       console.warn('[NDVI] Geen geldige pixels! noData=' + noData + ' bR=' + bR + ' bN=' + bN + ' vals-bR range: ' + gr.mins[bR] + '\u2013' + gr.maxs[bR] + '  vals-bN range: ' + gr.mins[bN] + '\u2013' + gr.maxs[bN]);
-      toast('Geen geldige NDVI pixels — controleer de geselecteerde banden', true);
+      toast(t('toastNoValidPixels'), true);
     }
 
     state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
@@ -1288,7 +1288,7 @@
 
   function autoClassifyFromData() {
     var data = state.ndviHistogramData;
-    if (!data) { toast('Laad eerst een NDVI kaart.', true); return; }
+    if (!data) { toast(t('toastNoNDVI'), true); return; }
     var counts = data.counts, n = counts.length;
     var total = 0;
     for (var i = 0; i < n; i++) total += counts[i];
@@ -1307,7 +1307,7 @@
     state.classes.forEach(function (cls, i) { cls.min = bounds[i]; cls.max = bounds[i + 1]; });
     renderClasses();
     liveRegenerate();
-    toast('Klassen ingesteld op gelijke NDVI-oppervlakte (' + numCls + ' klassen).');
+    toast(tf('toastClassesSet', numCls));
   }
 
   // ==========================================
@@ -1335,13 +1335,13 @@
    */
   async function loadBRP() {
     if (map.getZoom() < MIN_ZOOM_BRP) {
-      $('#parcel-hint').textContent = 'Zoom verder in om BRP percelen te laden (zoom ≥ ' + MIN_ZOOM_BRP + ').';
+      $('#parcel-hint').textContent = tf('parcelHintZoom', MIN_ZOOM_BRP);
       $('#parcel-hint').classList.remove('hidden');
       return;
     }
     if (state.brpLoading) return;
 
-    $('#parcel-hint').textContent = 'BRP percelen laden...';
+    $('#parcel-hint').textContent = t('parcelHintLoading');
     state.brpLoading = true;
 
     try {
@@ -1419,11 +1419,11 @@
       }).addTo(brpOverlay);
 
       var count = data.features ? data.features.length : 0;
-      $('#parcel-hint').textContent = count + ' percelen geladen. Klik om te selecteren.';
+      $('#parcel-hint').textContent = tf('parcelHintLoaded', count);
 
     } catch (err) {
       console.error('BRP laden mislukt:', err);
-      $('#parcel-hint').textContent = 'BRP laden mislukt. Probeer opnieuw.';
+      $('#parcel-hint').textContent = t('parcelHintFailed');
     } finally {
       state.brpLoading = false;
     }
@@ -1459,10 +1459,10 @@
     var wasEmpty = state.selectedParcels.length === 0;
     if (idx >= 0) {
       state.selectedParcels.splice(idx, 1);
-      toast('Perceel verwijderd.');
+      toast(t('toastParcelRemoved'));
     } else {
       state.selectedParcels.push(feature);
-      toast('Perceel toegevoegd! (' + state.selectedParcels.length + ' geselecteerd)');
+      toast(tf('toastParcelAdded', state.selectedParcels.length));
     }
     // Immediately update the BRP layer style for this feature
     refreshBRPLayerStyles();
@@ -1545,7 +1545,7 @@
       console.log('[Clip] masked pixels=' + maskedCount + ' / ' + mask.length);
       if (maskedCount === 0) {
         console.warn('[Clip] 0 masked pixels — polygon ligt waarschijnlijk buiten het raster');
-        toast('Perceel ligt buiten het rastergebied — kan niet knippen.', 'warn');
+        toast(t('toastOutsideRaster'), 'warn');
         return;
       }
     }
@@ -1557,7 +1557,7 @@
     }
     console.log('[Clip] valid NDVI pixels in mask=' + vals.length);
     if (vals.length === 0) {
-      toast('Geen geldige NDVI pixels in geselecteerd perceel.', 'warn');
+      toast(t('toastNoValidNDVI'), 'warn');
       return;
     }
 
@@ -1657,7 +1657,7 @@
     // Totals
     var totalArea = 0;
     state.selectedParcels.forEach(function (f) { try { totalArea += turf.area(f); } catch (e) {} });
-    $('#parcel-count').textContent = state.selectedParcels.length + (state.selectedParcels.length === 1 ? ' perceel' : ' percelen');
+    $('#parcel-count').textContent = state.selectedParcels.length === 1 ? tf('parcelCount1', state.selectedParcels.length) : tf('parcelCountN', state.selectedParcels.length);
     $('#parcel-area').textContent = (totalArea / 10000).toFixed(2) + ' ha';
 
     // Parcel list with inline crop history
@@ -1665,7 +1665,7 @@
     if (listEl) {
       listEl.innerHTML = state.selectedParcels.map(function (f, i) {
         var props = f.properties || {};
-        var name = props.gewas || props.gewasgroep || props.GWS_GEWAS || ('Perceel ' + (i + 1));
+        var name = props.gewas || props.gewasgroep || props.GWS_GEWAS || tf('parcelN', i + 1);
         var area = '?';
         try { area = (turf.area(f) / 10000).toFixed(2) + ' ha'; } catch (e) {}
         return '<div class="parcel-hist-item">' +
@@ -1673,7 +1673,7 @@
           '<span class="phi-name">' + escapeHtml(name) + ' <span class="phi-area">— ' + escapeHtml(area) + '</span></span>' +
           '<button class="remove-parcel" data-i="' + i + '">×</button>' +
           '</div>' +
-          '<div class="phi-hist" id="phi-hist-' + i + '"><span class="phi-loading">gewasgeschiedenis laden…</span></div>' +
+          '<div class="phi-hist" id="phi-hist-' + i + '"><span class="phi-loading">' + t('cropHistLoading') + '</span></div>' +
           '</div>';
       }).join('');
       listEl.querySelectorAll('.remove-parcel').forEach(function (btn) {
@@ -1755,7 +1755,7 @@
       state.selectedParcels = [];
       refreshBRPLayerStyles();
       updateSelectionDisplay(false);
-      toast('Selectie gewist.');
+      toast(t('toastSelectionCleared'));
     });
   }
 
@@ -1775,7 +1775,7 @@
   function renderParcelHistory(histEl, byYear) {
     var years = Object.keys(byYear).sort(function (a, b) { return Number(b) - Number(a); });
     if (years.length === 0) {
-      histEl.innerHTML = '<span class="phi-none">geen data beschikbaar</span>';
+      histEl.innerHTML = '<span class="phi-none">' + t('cropHistNone') + '</span>';
       return;
     }
     histEl.innerHTML = years.map(function (y) {
@@ -1796,7 +1796,7 @@
 
     var centroid;
     try { centroid = turf.centroid(feature).geometry.coordinates; }
-    catch (e) { histEl.innerHTML = '<span class="phi-error">fout</span>'; return; }
+    catch (e) { histEl.innerHTML = '<span class="phi-error">' + t('cropHistError') + '</span>'; return; }
 
     var pt28992 = proj4('EPSG:4326', 'EPSG:28992', centroid);
     var body =
@@ -1845,7 +1845,7 @@
     } catch (err) {
       console.warn('Gewasgeschiedenis laden mislukt:', err);
       var el = document.getElementById('phi-hist-' + idx);
-      if (el) el.innerHTML = '<span class="phi-error">niet beschikbaar</span>';
+      if (el) el.innerHTML = '<span class="phi-error">' + t('cropHistNA') + '</span>';
     }
   }
 
@@ -1997,10 +1997,10 @@
       if (gridAngleSlider) gridAngleSlider.value = 0;
       if (gridAngleValue) gridAngleValue.textContent = '0°';
       if (autoAngleHint) {
-        autoAngleHint.textContent = 'Noord-Zuid (klassiek fishnet)';
+        autoAngleHint.textContent = t('autoAngleHintNS');
         autoAngleHint.style.display = '';
       }
-      toast('Rijrichting: Noord-Zuid (0°)');
+      toast(t('toastNorthSouth'));
       liveRegenerate();
     });
   }
@@ -2008,7 +2008,7 @@
   if (autoAngleBtn) {
     autoAngleBtn.addEventListener('click', function () {
       if (!state.selectedParcels || state.selectedParcels.length === 0) {
-        toast('Selecteer eerst een perceel.', true);
+        toast(t('toastSelectParcel'), true);
         return;
       }
       var angle = computeOptimalGridAngle(state.selectedParcels);
@@ -2016,10 +2016,10 @@
       if (gridAngleSlider) gridAngleSlider.value = angle;
       if (gridAngleValue) gridAngleValue.textContent = angle + '°';
       if (autoAngleHint) {
-        autoAngleHint.textContent = 'Rijrichting: ' + angle + '° (langste zijde perceel)';
+        autoAngleHint.textContent = tf('autoAngleHintAngle', angle);
         autoAngleHint.style.display = '';
       }
-      toast('Rijrichting ingesteld op ' + angle + '°');
+      toast(tf('toastAngleSet', angle));
       liveRegenerate();
     });
   }
@@ -2032,7 +2032,7 @@
   function renderClasses() {
     classesContainer.innerHTML =
       '<div class="class-labels">' +
-      '<span></span><span>Naam</span><span>Van</span><span>Tot</span><span>Dosering</span><span></span>' +
+      '<span></span><span>' + t('clsName') + '</span><span>' + t('clsFrom') + '</span><span>' + t('clsTo') + '</span><span>' + t('clsDose') + '</span><span></span>' +
       '</div>';
 
     state.classes.forEach(function (cls, i) {
@@ -2185,21 +2185,21 @@
 
   generateBtn.addEventListener('click', function () {
     if (!state.selectedParcels || state.selectedParcels.length === 0) {
-      toast('Selecteer eerst een of meer percelen.', true);
+      toast(t('toastSelectParcels'), true);
       return;
     }
-    showLoading('Taakkaart genereren...');
+    showLoading(t('loadingGenerate'));
     setTimeout(function () {
       try {
         generateTaskMap();
         hideLoading();
-        toast('Taakkaart gegenereerd!');
+        toast(t('toastGenerated'));
         renderExportStats();
         activateStep(5);
       } catch (err) {
         hideLoading();
         console.error(err);
-        toast('Fout bij genereren: ' + err.message, true);
+        toast(tf('toastGenerateError', err.message), true);
       }
     }, 50);
   });
@@ -2425,8 +2425,8 @@
     });
 
     var html =
-      '<div class="stat-row"><span class="stat-label">Totaal cellen</span><span class="stat-value">' + features.length + '</span></div>' +
-      '<div class="stat-row"><span class="stat-label">Totaal oppervlakte</span><span class="stat-value">' + (totalArea / 10000).toFixed(2) + ' ha</span></div>' +
+      '<div class="stat-row"><span class="stat-label">' + t('statCells') + '</span><span class="stat-value">' + features.length + '</span></div>' +
+      '<div class="stat-row"><span class="stat-label">' + t('statArea') + '</span><span class="stat-value">' + (totalArea / 10000).toFixed(2) + ' ha</span></div>' +
       '<hr style="margin:8px 0;border:none;border-top:1px solid var(--border)">';
 
     Object.keys(classCounts).forEach(function (k) {
@@ -2443,14 +2443,14 @@
     });
 
     html += '<hr style="margin:8px 0;border:none;border-top:1px solid var(--border)">' +
-      '<div class="stat-row"><span class="stat-label">Totaal product</span>' +
+      '<div class="stat-row"><span class="stat-label">' + t('statProduct') + '</span>' +
       '<span class="stat-value">' + Math.round(totalProduct) + ' ' + escapeHtml(unitShort) + '</span></div>';
 
     $('#export-stats').innerHTML = html;
   }
 
   exportShpBtn.addEventListener('click', function () {
-    if (!state.taskMapFC) { toast('Genereer eerst een taakkaart.', true); return; }
+    if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
     try {
       var name = exportNameInput.value || 'taakkaart';
       var blob = buildShapefileZip(state.taskMapFC, name);
@@ -2459,15 +2459,15 @@
       a.href = url; a.download = name + '.zip';
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-      toast('Shapefile download gestart.');
+      toast(t('toastShpDownload'));
     } catch (err) {
       console.error(err);
-      toast('Export fout: ' + err.message, true);
+      toast(tf('toastExportError', err.message), true);
     }
   });
 
   exportGeoBtn.addEventListener('click', function () {
-    if (!state.taskMapFC) { toast('Genereer eerst een taakkaart.', true); return; }
+    if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
 
     var name = exportNameInput.value || 'taakkaart';
     var exportFC = {
@@ -2496,12 +2496,12 @@
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    toast('GeoJSON download gestart.');
+    toast(t('toastGeoJSONDownload'));
   });
 
   var exportCsvBtn = $('#export-csv-btn');
   if (exportCsvBtn) exportCsvBtn.addEventListener('click', function () {
-    if (!state.taskMapFC) { toast('Genereer eerst een taakkaart.', true); return; }
+    if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
     var name = exportNameInput.value || 'taakkaart';
     var csv = buildCSV(state.taskMapFC);
     var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -2509,13 +2509,13 @@
     var a = document.createElement('a'); a.href = url; a.download = name + '.csv';
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    toast('CSV download gestart.');
+    toast(t('toastCSVDownload'));
   });
 
   var exportIsoxmlBtn = $('#export-isoxml-btn');
   if (exportIsoxmlBtn) exportIsoxmlBtn.addEventListener('click', function () {
-    if (!state.taskMapFC) { toast('Genereer eerst een taakkaart.', true); return; }
-    showLoading('ISOXML bouwen...');
+    if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
+    showLoading(t('loadingISOXML'));
     setTimeout(function () {
       try {
         var name = exportNameInput.value || 'taakkaart';
@@ -2526,13 +2526,22 @@
         var a = document.createElement('a'); a.href = url; a.download = name + '_TASKDATA.zip';
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
-        toast('ISOXML download gestart.');
+        toast(t('toastISOXMLDownload'));
       } catch (err) {
         hideLoading();
         console.error(err);
-        toast('ISOXML fout: ' + err.message, true);
+        toast(tf('toastISOXMLError', err.message), true);
       }
     }, 50);
+  });
+
+  // ==========================================
+  // LANGUAGE CHANGE HANDLER
+  // ==========================================
+  window.addEventListener('langchange', function () {
+    // Re-render dynamic sections that contain translated strings
+    renderClasses();
+    renderExportStats();
   });
 
   // ==========================================
@@ -2561,11 +2570,11 @@
       if (open) {
         sidebar.classList.remove('collapsed');
         btn.classList.add('panel-open');
-        lbl.textContent = 'Verberg';
+        lbl.textContent = t('mobileHide');
       } else {
         sidebar.classList.add('collapsed');
         btn.classList.remove('panel-open');
-        lbl.textContent = 'Paneel';
+        lbl.textContent = t('mobilePanel');
       }
     }
     btn.addEventListener('click', function () {
@@ -2654,7 +2663,7 @@
     var numCols = Math.max(1, Math.ceil((lonMax - lonMin) / cellLonDeg));
     var numRows = Math.max(1, Math.ceil((latMax - latMin) / cellLatDeg));
     if (numCols * numRows > 500000) {
-      toast('Grid te groot voor ISOXML — vergroot de gridgrootte.', true); return null;
+      toast(t('toastGridTooLarge'), true); return null;
     }
     var gridBin = new Uint8Array(numRows * numCols);
     geojson.features.forEach(function (f) {
