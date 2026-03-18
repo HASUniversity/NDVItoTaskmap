@@ -4,7 +4,7 @@
 
 Een browser-gebaseerde tool om variabele-dosering taakkaarten te genereren vanuit multispectrale NDVI GeoTIFF-opnames van drones.
 
-**Geen server, geen installatie, geen account** — open `index.html` en begin.
+**Geen installatie, geen account** — kloon de repository, start een lokale webserver en open de app in je browser.
 
 ---
 
@@ -59,7 +59,8 @@ Het ISOXML-formaat implementeert ISO 11783-10 (TASKDATA.XML + GRD-binair grid) e
 | [proj4js](https://github.com/proj4js/proj4js) | CRS-conversies (RD New, UTM, WGS84) |
 | [Turf.js](https://turfjs.org/) | Ruimtelijke analyse — grids, intersectie, centroïde, oppervlakte |
 
-Pure HTML, CSS en vanilla JavaScript — geen frameworks, geen Node.js, geen build-tooling.
+Pure HTML, CSS en vanilla JavaScript — geen frameworks, geen Node.js, geen build-tooling vereist.
+De applicatielogica is opgesplitst in ES-modules (`static/*.js`) die native door moderne browsers worden geladen.
 
 ---
 
@@ -70,7 +71,48 @@ git clone https://github.com/HASUniversity/NDVItoTaskmap.git
 cd NDVItoTaskmap
 ```
 
-Open `index.html` direct in Chrome, Firefox of Edge. Geen lokale webserver vereist.
+> **Let op:** de applicatie gebruikt ES-modules (`import`/`export`). Browsers staan
+> dit niet toe via het `file://`-protocol. Start een lokale webserver:
+
+```bash
+# Python (ingebouwd, geen installatie nodig)
+python -m http.server 8080
+
+# Node.js
+npx serve .
+
+# VS Code: gebruik de extensie "Live Server" (rechtsklik → Open with Live Server)
+```
+
+Open vervolgens <http://localhost:8080> in Chrome, Firefox of Edge.
+
+---
+
+## Projectstructuur
+
+```
+NDVItoTaskmap/
+├── index.html              # Enige HTML-pagina; laadt vendor-scripts en app.js
+├── static/
+│   ├── app.js              # ES-module entrypoint — imports en initialisatie
+│   ├── state.js            # Gedeelde applicatiestatus en constanten
+│   ├── utils.js            # Hulpfuncties (loading, toast, coördinatentransformaties)
+│   ├── map.js              # Leaflet-kaart, basislagen, laagcontrole, legenda
+│   ├── steps.js            # Wizard-stap-navigatie
+│   ├── geotiff-loader.js   # GeoTIFF-upload, bandselectie, resolutieslider
+│   ├── ndvi.js             # Kleurrampen, NDVI-rendering, histogram, auto-classificatie
+│   ├── brp.js              # BRP WFS-laden, perceelselectie, gewashistorie
+│   ├── taskmap.js          # Klasseneditor, taakkaartgeneratie, rijrichting
+│   ├── export.js           # CSV, ISOXML, Shapefile en GeoJSON export
+│   ├── i18n.js             # Internationalisation (NL/EN)
+│   ├── styles.css
+│   └── vendor/             # Gebundelde third-party libraries (geen CDN-afhankelijkheid)
+│       ├── leaflet.js / leaflet.css
+│       ├── geotiff.js
+│       ├── proj4.js
+│       └── turf.min.js
+└── LICENSE
+```
 
 ---
 
@@ -102,7 +144,7 @@ Perceelgrenzen en gewasregistraties worden live opgehaald van [PDOK](https://www
 
 A browser-based tool for generating variable-rate prescription task maps from multispectral NDVI GeoTIFF drone imagery.
 
-**No server, no build step, no account needed** — open `index.html` and go.
+**No build step, no account needed** — clone the repo, start a local web server, and open the app in your browser.
 
 ---
 
@@ -158,6 +200,7 @@ ISOXML implements ISO 11783-10 (TASKDATA.XML + binary GRD grid) and is directly 
 | [Turf.js](https://turfjs.org/) | Spatial analysis — grids, intersection, centroid, area |
 
 Pure HTML, CSS, and vanilla JavaScript. No frameworks, no Node.js, no build tooling.
+Application logic is split into ES modules (`static/*.js`) loaded natively by the browser.
 
 ---
 
@@ -168,7 +211,48 @@ git clone https://github.com/HASUniversity/NDVItoTaskmap.git
 cd NDVItoTaskmap
 ```
 
-Open `index.html` directly in Chrome, Firefox, or Edge. No local web server required.
+> **Note:** The app uses ES modules (`import`/`export`). Browsers block module
+> loading over the `file://` protocol. Start a local web server:
+
+```bash
+# Python (built-in, no install needed)
+python -m http.server 8080
+
+# Node.js
+npx serve .
+
+# VS Code: use the "Live Server" extension (right-click → Open with Live Server)
+```
+
+Then open <http://localhost:8080> in Chrome, Firefox, or Edge.
+
+---
+
+### Project Structure
+
+```
+NDVItoTaskmap/
+├── index.html              # Single HTML page; loads vendor scripts and app.js
+├── static/
+│   ├── app.js              # ES module entrypoint — imports and initialisation
+│   ├── state.js            # Shared application state and constants
+│   ├── utils.js            # Helpers (loading overlay, toast, coordinate transforms)
+│   ├── map.js              # Leaflet map, base layers, layer control, legend
+│   ├── steps.js            # Wizard step navigation
+│   ├── geotiff-loader.js   # GeoTIFF upload, band selection, resolution slider
+│   ├── ndvi.js             # Colour ramps, NDVI rendering, histogram, auto-classify
+│   ├── brp.js              # BRP WFS loading, parcel selection, crop history
+│   ├── taskmap.js          # Class editor, task map generation, driving direction
+│   ├── export.js           # CSV, ISOXML, Shapefile, and GeoJSON export
+│   ├── i18n.js             # Internationalisation (NL/EN)
+│   ├── styles.css
+│   └── vendor/             # Bundled third-party libraries (no CDN dependency)
+│       ├── leaflet.js / leaflet.css
+│       ├── geotiff.js
+│       ├── proj4.js
+│       └── turf.min.js
+└── LICENSE
+```
 
 ---
 
