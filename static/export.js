@@ -15,7 +15,7 @@
    =================================================== */
 
 import { state } from './state.js';
-import { toast, escapeHtml, escapeXml } from './utils.js';
+import { toast, escapeHtml, escapeXml, showLoading, hideLoading } from './utils.js';
 
 const { t, tf } = window;
 
@@ -83,7 +83,6 @@ const exportIsoxmlBtn = document.querySelector('#export-isoxml-btn');
 if (exportIsoxmlBtn) {
   exportIsoxmlBtn.addEventListener('click', function () {
     if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
-    const { showLoading, hideLoading } = window._appUtils;
     showLoading(t('loadingISOXML'));
     setTimeout(function () {
       try {

@@ -13,7 +13,7 @@ import { drawNDVIHistogram } from './ndvi.js';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
-import { isMobileUI } from './map.js';
+import { isMobileUI, showLegendInPanel } from './map.js';
 
 /**
  * Marks step `n` as active and all previous steps as completed.
@@ -30,6 +30,7 @@ export function activateStep(n) {
     else if (s === n) el.classList.add('active');
     else el.classList.add('disabled');
   });
+  if (n >= 3) showLegendInPanel();
   if (n === 4) setTimeout(drawNDVIHistogram, 400);
 }
 
@@ -54,6 +55,7 @@ export function openStep(n) {
   if (isMobileUI()) {
     setTimeout(() => stepEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
   }
+  if (n >= 3) showLegendInPanel();
   if (n === 4) setTimeout(drawNDVIHistogram, 400);
 }
 

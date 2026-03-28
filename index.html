@@ -6,7 +6,7 @@
   <title>Taakkaart Generator</title>
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🌾</text></svg>" />
   <link rel="stylesheet" href="static/vendor/leaflet.css" />
-  <link rel="stylesheet" href="static/styles.css?v=23" />
+  <link rel="stylesheet" href="static/styles.css?v=25" />
 </head>
 <body>
   <div class="app">
@@ -138,6 +138,15 @@
           </div>
           <div class="step-body">
             <div class="form-row">
+              <label for="ahn-select" data-i18n="lcAHN">AHN4 Hoogte</label>
+              <select id="ahn-select">
+                <option value="off" data-i18n="lcAhnOff">Uit</option>
+                <option value="dtm" data-i18n="lcAhnDtm">DTM (maaiveld)</option>
+                <option value="dsm" data-i18n="lcAhnDsm">DSM (oppervlak)</option>
+              </select>
+            </div>
+
+            <div class="form-row">
               <label for="grid-size" data-i18n="labelGridSize">Gridgrootte</label>
               <div class="range-wrap">
                 <input type="range" id="grid-size" min="3" max="30" step="1" value="10" />
@@ -254,6 +263,6 @@
   <!-- i18n (must load before app.js) -->
   <script src="static/i18n.js?v=1"></script>
   <!-- App -->
-  <script type="module" src="static/app.js?v=23"></script>
+  <script type="module" src="static/app.js?v=25"></script>
 </body>
 </html>

@@ -75,8 +75,43 @@ basemaps['Esri Satelliet'].addTo(map);
 })();
 
 // ==========================================
+// AHN4 HOOGTE (per-parcel WMS overlay)
+// ==========================================
+const AHN_WMS_BASE = 'https://service.pdok.nl/rws/actueel-hoogtebestand-nederland/wms/v1_0';
+let _ahnMode = 'off';  // 'off' | 'dtm' | 'dsm'
+
+export function getAhnMode() { return _ahnMode; }
+export function setAhnMode(mode) { _ahnMode = mode; refreshAhnOverlay(); }
+
+/**
+ * Creates a bounds-restricted WMS tile layer for AHN around the
+ * selected parcels only.  Tiles outside the selection are never fetched.
+ */
+export function refreshAhnOverlay() {
+  ahnOverlay.clearLayers();
+  if (_ahnMode === 'off') return;
+  const parcels = state.selectedParcels;
+  if (!parcels || parcels.length === 0) return;
+
+  const layerName = _ahnMode === 'dtm' ? 'dtm_05m' : 'dsm_05m';
+  const fc = { type: 'FeatureCollection', features: parcels };
+  const combinedBounds = L.geoJSON(fc).getBounds().pad(0.05); // 5% padding
+
+  L.tileLayer.wms(AHN_WMS_BASE, {
+    layers: layerName,
+    format: 'image/png',
+    transparent: true,
+    attribution: 'AHN4 &copy; RWS / PDOK',
+    maxZoom: 19,
+    opacity: 0.65,
+    bounds: combinedBounds,
+  }).addTo(ahnOverlay);
+}
+
+// ==========================================
 // LAYER GROUPS
 // ==========================================
+export const ahnOverlay        = L.layerGroup().addTo(map);
 export const ndviOverlay       = L.layerGroup().addTo(map);
 export const selectionOverlay  = L.layerGroup().addTo(map);
 export const brpOverlay        = L.layerGroup().addTo(map);
@@ -154,6 +189,11 @@ const LayerControlClass = L.Control.extend({
       '<label class="ulc-check"><input type="checkbox" data-layer="taakkaart"> <span data-i18n="lcTaskmap">\uD83D\uDCCB Taakkaart</span></label>' +
       '<label class="ulc-check"><input type="checkbox" data-layer="percelen" checked> <span data-i18n="lcParcels">\uD83D\uDFE1 Percelen</span></label>' +
       '<label class="ulc-check"><input type="checkbox" data-layer="selectie" checked> <span data-i18n="lcSelection">\u2705 Selectie</span></label>' +
+      '<div class="ulc-sep"></div>' +
+      '<div class="ulc-section-title" data-i18n="lcAHN">AHN4 Hoogte</div>' +
+      '<label class="ulc-radio"><input type="radio" name="ahn" value="off" checked> <span data-i18n="lcAhnOff">Uit</span></label>' +
+      '<label class="ulc-radio"><input type="radio" name="ahn" value="dtm"> <span data-i18n="lcAhnDtm">\uD83D\uDDFB DTM (maaiveld)</span></label>' +
+      '<label class="ulc-radio"><input type="radio" name="ahn" value="dsm"> <span data-i18n="lcAhnDsm">\uD83C\uDFD7 DSM (oppervlak)</span></label>' +
       '<div class="ulc-sep ulc-ndvi-section" style="display:none"></div>' +
       '<div class="ulc-ndvi-section" style="display:none">' +
         '<div class="ulc-section-title" id="mobile-legend-title">NDVI</div>' +
@@ -175,6 +215,14 @@ const LayerControlClass = L.Control.extend({
         basemaps[_activeBasemap].remove();
         _activeBasemap = radio.value;
         basemaps[_activeBasemap].addTo(map);
+      });
+    });
+
+    // AHN radio toggle (DTM / DSM / off)
+    panel.querySelectorAll('input[name="ahn"]').forEach(function (radio) {
+      radio.addEventListener('change', function () {
+        if (!radio.checked) return;
+        setAhnMode(radio.value);
       });
     });
 

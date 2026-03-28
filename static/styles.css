@@ -844,12 +844,12 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: var(--shadow) !important;
 }
 
-/* ---------- Desktop NDVI legend (always visible, bottom-left of map) ---------- */
+/* ---------- Desktop NDVI legend (bottom-right of map) ---------- */
 .desktop-legend {
   position: absolute;
   bottom: 30px;
-  left: 12px;
-  z-index: 900;
+  right: 12px;
+  z-index: 1100;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -919,6 +919,8 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: var(--shadow);
   padding: 10px 12px;
   min-width: 180px;
+  max-height: 70vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 5px;

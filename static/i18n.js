@@ -73,6 +73,10 @@
       lcTaskmap:      '\uD83D\uDCCB Taakkaart',
       lcParcels:      '\uD83D\uDFE1 Percelen',
       lcSelection:    '\u2705 Selectie',
+      lcAHN:          'AHN4 Hoogte',
+      lcAhnOff:       'Uit',
+      lcAhnDtm:       '\uD83D\uDDFB DTM (maaiveld)',
+      lcAhnDsm:       '\uD83C\uDFD7 DSM (oppervlak)',
 
       // ── Class table headers ──────────────────
       clsName:        'Naam',
@@ -86,6 +90,7 @@
       clsMid:         'Midden',
       clsHigh:        'Hoog',
       clsVeryHigh:    'Zeer hoog',
+      clsNewClass:    'Klasse {0}',
 
       // ── Export stats ─────────────────────────
       statCells:      'Totaal cellen',
@@ -223,6 +228,10 @@
       lcTaskmap:      '\uD83D\uDCCB Task map',
       lcParcels:      '\uD83D\uDFE1 Fields',
       lcSelection:    '\u2705 Selection',
+      lcAHN:          'AHN4 Elevation',
+      lcAhnOff:       'Off',
+      lcAhnDtm:       '\uD83D\uDDFB DTM (terrain)',
+      lcAhnDsm:       '\uD83C\uDFD7 DSM (surface)',
 
       // ── Class table headers ──────────────────
       clsName:        'Name',
@@ -236,6 +245,7 @@
       clsMid:         'Medium',
       clsHigh:        'High',
       clsVeryHigh:    'Very high',
+      clsNewClass:    'Class {0}',
 
       // ── Export stats ─────────────────────────
       statCells:      'Total cells',

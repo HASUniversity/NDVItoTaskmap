@@ -75,8 +75,10 @@ export function toast(msg, isError) {
 export function debounce(fn, ms) {
   let timer;
   return function () {
+    const ctx = this;
+    const args = arguments;
     clearTimeout(timer);
-    timer = setTimeout(fn, ms);
+    timer = setTimeout(function () { fn.apply(ctx, args); }, ms);
   };
 }
 

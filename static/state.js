@@ -78,4 +78,5 @@ export const state = {
   ndviScaleMin: null,
   ndviScaleMax: null,
   brpLayerMap: {},
+  ahnMode: 'off',
 };

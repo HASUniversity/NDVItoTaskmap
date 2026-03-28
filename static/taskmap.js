@@ -11,7 +11,7 @@
    =================================================== */
 
 import { state, defaultClasses } from './state.js';
-import { toast, escapeHtml } from './utils.js';
+import { toast, escapeHtml, showLoading, hideLoading } from './utils.js';
 import { map, gridOverlay } from './map.js';
 import { drawNDVIHistogram, ndviToRGB, autoClassifyFromData } from './ndvi.js';
 import { activateStep } from './steps.js';
@@ -119,7 +119,7 @@ export function renderClasses() {
     row.className = 'class-row';
     row.innerHTML =
       '<input type="color" class="class-color" value="' + cls.color + '" data-i="' + i + '">' +
-      '<input type="text" value="' + cls.name + '" data-i="' + i + '" data-field="name">' +
+      '<input type="text" value="' + escapeHtml(cls.name) + '" data-i="' + i + '" data-field="name">' +
       '<input type="number" step="0.01" value="' + cls.min + '" data-i="' + i + '" data-field="min">' +
       '<input type="number" step="0.01" value="' + cls.max + '" data-i="' + i + '" data-field="max">' +
       '<input type="number" step="1" value="' + cls.rate + '" data-i="' + i + '" data-field="rate">' +
@@ -151,7 +151,7 @@ export function renderClasses() {
 
 addClassBtn.addEventListener('click', function () {
   const last = state.classes[state.classes.length - 1];
-  state.classes.push({ name: 'Klasse ' + (state.classes.length + 1), min: last ? last.max : 0, max: 1, rate: 50, color: '#9e9e9e' });
+  state.classes.push({ name: tf('clsNewClass', state.classes.length + 1), min: last ? last.max : 0, max: 1, rate: 50, color: '#9e9e9e' });
   renderClasses();
 });
 
@@ -171,7 +171,6 @@ generateBtn.addEventListener('click', function () {
   if (!state.selectedParcels || state.selectedParcels.length === 0) {
     toast(t('toastSelectParcels'), true); return;
   }
-  const { showLoading, hideLoading } = window._appUtils;
   showLoading(t('loadingGenerate'));
   setTimeout(function () {
     try {

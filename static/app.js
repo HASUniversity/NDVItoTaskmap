@@ -16,11 +16,6 @@ import './brp.js';
 import './export.js';
 
 // ==========================================
-// EXPOSE HELPERS FOR SUB-MODULES
-// ==========================================
-window._appUtils = { showLoading, hideLoading };
-
-// ==========================================
 // INIT
 // ==========================================
 state.classes = defaultClasses();

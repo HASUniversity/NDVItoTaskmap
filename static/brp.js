@@ -14,12 +14,27 @@
 
 import { state, BRP_WFS_URL, MIN_ZOOM_BRP } from './state.js';
 import { debounce, toast, escapeHtml } from './utils.js';
-import { map, brpOverlay, selectionOverlay, clearLegendCrop, updateLegendCrop } from './map.js';
+import { map, brpOverlay, selectionOverlay, clearLegendCrop, updateLegendCrop, refreshAhnOverlay, setAhnMode } from './map.js';
 import { clipNDVIToParcel, drawNDVIHistogram } from './ndvi.js';
 import { activateStep } from './steps.js';
 import { renderClasses } from './taskmap.js';
 
 const { t, tf } = window;
+
+// Tracks the in-flight WFS request so a newer map move can cancel it.
+let _brpAbortController = null;
+
+/**
+ * Returns true when features `a` and `b` refer to the same parcel.
+ * Prefers id-based comparison; falls back to geometry serialisation.
+ * @param {object} a - GeoJSON Feature
+ * @param {object} b - GeoJSON Feature
+ * @returns {boolean}
+ */
+function _sameFeature(a, b) {
+  if (a.id && b.id) return a.id === b.id;
+  return JSON.stringify(a.geometry) === JSON.stringify(b.geometry);
+}
 
 // ==========================================
 // BRP LOADING
@@ -40,7 +55,10 @@ async function loadBRP() {
     if (h) { h.textContent = tf('parcelHintZoom', MIN_ZOOM_BRP); h.classList.remove('hidden'); }
     return;
   }
-  if (state.brpLoading) return;
+  // Cancel any superseded in-flight request and start a fresh one.
+  if (_brpAbortController) _brpAbortController.abort();
+  _brpAbortController = new AbortController();
+  const { signal } = _brpAbortController;
 
   const hint = document.querySelector('#parcel-hint');
   if (hint) hint.textContent = t('parcelHintLoading');
@@ -76,6 +94,7 @@ async function loadBRP() {
       method: 'POST',
       headers: { 'Content-Type': 'text/xml;charset=UTF-8' },
       body,
+      signal,
     });
     if (!resp.ok) throw new Error('WFS ' + resp.status);
 
@@ -110,6 +129,7 @@ async function loadBRP() {
     const count = data.features ? data.features.length : 0;
     if (hint) hint.textContent = tf('parcelHintLoaded', count);
   } catch (err) {
+    if (err.name === 'AbortError') return; // superseded by a newer request
     console.error('BRP laden mislukt:', err);
     const hint = document.querySelector('#parcel-hint');
     if (hint) hint.textContent = t('parcelHintFailed');
@@ -129,10 +149,7 @@ async function loadBRP() {
  * @returns {boolean}
  */
 export function isParcelSelected(feature) {
-  return state.selectedParcels.some(function (f) {
-    if (f.id && feature.id) return f.id === feature.id;
-    return JSON.stringify(f.geometry) === JSON.stringify(feature.geometry);
-  });
+  return state.selectedParcels.some(function (f) { return _sameFeature(f, feature); });
 }
 
 /**
@@ -159,9 +176,7 @@ export function refreshBRPLayerStyles() {
 export function toggleParcel(feature) {
   let idx = -1;
   for (let i = 0; i < state.selectedParcels.length; i++) {
-    const f = state.selectedParcels[i];
-    const same = (f.id && feature.id) ? f.id === feature.id : JSON.stringify(f.geometry) === JSON.stringify(feature.geometry);
-    if (same) { idx = i; break; }
+    if (_sameFeature(state.selectedParcels[i], feature)) { idx = i; break; }
   }
   const wasEmpty = state.selectedParcels.length === 0;
   if (idx >= 0) { state.selectedParcels.splice(idx, 1); toast(t('toastParcelRemoved')); }
@@ -178,6 +193,9 @@ export function toggleParcel(feature) {
  */
 export function updateSelectionDisplay(fitBounds) {
   selectionOverlay.clearLayers();
+
+  // refresh AHN height overlay for the new selection
+  refreshAhnOverlay();
 
   if (state.selectedParcels.length === 0) {
     document.querySelector('#parcel-info').classList.add('hidden');
@@ -274,6 +292,17 @@ if (clearParcelsBtn) {
     refreshBRPLayerStyles();
     updateSelectionDisplay(false);
     toast(t('toastSelectionCleared'));
+  });
+}
+
+// AHN layer selector in sidebar
+const ahnSelect = document.querySelector('#ahn-select');
+if (ahnSelect) {
+  ahnSelect.addEventListener('change', function () {
+    setAhnMode(ahnSelect.value);
+    // Sync the radio buttons in the layer control panel
+    const radio = document.querySelector('input[name="ahn"][value="' + ahnSelect.value + '"]');
+    if (radio) radio.checked = true;
   });
 }
 
