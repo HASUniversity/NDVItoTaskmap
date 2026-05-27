@@ -48,9 +48,23 @@ export function showLoading(text) {
   loadingOverlay.classList.remove('hidden');
 }
 
+/** Shows or updates a secondary detail line below the main loading text. */
+export function setLoadingDetail(detail) {
+  var el = document.querySelector('#loading-detail');
+  if (!el) return;
+  if (detail) {
+    el.textContent = detail;
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
 /** Hides the full-screen loading overlay. */
 export function hideLoading() {
   loadingOverlay.classList.add('hidden');
+  var el = document.querySelector('#loading-detail');
+  if (el) el.classList.add('hidden');
 }
 
 /**

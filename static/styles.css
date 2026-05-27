@@ -360,6 +360,34 @@ select:focus, input[type="text"]:focus, input[type="number"]:focus {
   box-shadow: 0 0 0 3px rgba(76,175,80,.15);
 }
 
+/* ---------- Unit Select Hint ---------- */
+.unit-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  padding-left: 2px;
+  line-height: 1.4;
+  min-height: 16px;
+}
+
+/* ---------- Optgroup styling for unit select ---------- */
+select optgroup {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg);
+  padding: 4px 6px;
+  font-size: 11px;
+  letter-spacing: .3px;
+}
+select optgroup option {
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--text);
+  padding: 4px 8px;
+}
+
 /* ---------- Range Slider ---------- */
 .range-wrap {
   display: flex;
@@ -687,23 +715,32 @@ input[type="range"]::-moz-range-thumb {
   display: none;
 }
 
-/* ---------- NDVI scale (inside layer panel) ---------- */
+/* ---------- NDVI scale (inside ULC panel) ---------- */
+.ulc-ndvi-section {
+  padding-bottom: 2px;
+}
+
 .legend-gradient {
-  width: 140px;
-  height: 14px;
-  border-radius: 3px;
+  width: 100%;
+  height: 18px;
+  border-radius: 4px;
+  /* The actual gradient colours are set dynamically via JS
+     (generateNdviGradientCss in map.js) — this is a fallback. */
   background: linear-gradient(to right,
-    #b40000, #e63c00, #ff9600, #ffdc00, #b4e632, #50c828, #148414, #006e0a, #003c00
+    #b40000, #e63c00, #ff9600, #ffdc00, #b4e632, #50c828, #14a014, #006e0a, #003c00
   );
   box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
+  margin: 6px 0 2px;
 }
 
 .legend-labels {
   display: flex;
   justify-content: space-between;
   margin-top: 2px;
-  font-size: 10px;
-  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.2px;
 }
 
 /* ---------- NDVI legend — parcel crop section ---------- */
@@ -761,6 +798,43 @@ input[type="range"]::-moz-range-thumb {
   color: var(--text-muted);
   font-style: italic;
   margin-top: 8px;
+}
+
+/* ---------- Quick-export "off-ramp" card (Step 3) ----------
+   Visually separated download for the clipped NDVI so it does
+   not compete with the primary "Continue → task map" CTA. */
+.quick-export-card {
+  margin-top: 14px;
+  padding: 10px 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.quick-export-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.quick-export-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+.quick-export-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--text-secondary);
+}
+.quick-export-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 8px;
+  line-height: 1.35;
+}
+.quick-export-card .btn {
+  width: 100%;
 }
 
 /* ---------- Parcel history (in sidebar) ---------- */
@@ -844,35 +918,7 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: var(--shadow) !important;
 }
 
-/* ---------- Desktop NDVI legend (bottom-right of map) ---------- */
-.desktop-legend {
-  position: absolute;
-  bottom: 30px;
-  right: 12px;
-  z-index: 1100;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  padding: 8px 12px 6px;
-  min-width: 160px;
-  pointer-events: none;
-}
-.desktop-legend.hidden {
-  display: none;
-}
-.desktop-legend-title {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  color: var(--text-muted);
-  margin-bottom: 4px;
-}
-/* On mobile: hide the fixed legend (it's not needed there) */
-@media (max-width: 768px) and (hover: none) and (pointer: coarse) {
-  .desktop-legend { display: none !important; }
-}
+/* NDVI legend is now inside the ULC panel (both desktop and mobile) */
 
 /* ---------- Unified layer control ---------- */
 .ulc-wrap {
@@ -942,7 +988,7 @@ input[type="range"]::-moz-range-thumb {
   }
   /* Override .hidden so the panel is always shown on desktop */
   .ulc-panel.hidden {
-    display: flex;
+    display: flex !important;
   }
 
   #mobile-toggle {
@@ -1125,4 +1171,240 @@ input[type="range"]::-moz-range-thumb {
     grid-template-columns: 22px 1fr 46px 46px 54px 24px;
     gap: 4px;
   }
+}
+
+/* ============================================
+   WIZARD MODE — Show only active step body
+   ============================================ */
+
+/* Hide bodies of all non-active steps */
+.step:not(.active) .step-body {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  padding: 0 20px !important;
+  overflow: hidden;
+}
+
+/* Step progress indicator bar */
+.step-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px 8px;
+  gap: 4px;
+}
+
+.step-progress-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.step-progress-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: var(--border);
+  color: var(--text-muted);
+  transition: all var(--transition);
+}
+
+.step-progress-item.active .step-progress-dot {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 0 0 3px rgba(46,125,50,.2);
+}
+
+.step-progress-item.completed .step-progress-dot {
+  background: var(--primary-light);
+  color: white;
+}
+
+.step-progress-item.completed .step-progress-dot::after {
+  content: '✓';
+  font-size: 12px;
+}
+
+.step-progress-item.completed .step-progress-dot span {
+  display: none;
+}
+
+.step-progress-dot span {
+  font-size: 10px;
+}
+
+.step-progress-line {
+  flex: 1;
+  height: 2px;
+  background: var(--border);
+  min-width: 8px;
+}
+
+.step-progress-item.completed + .step-progress-item .step-progress-line,
+.step-progress-item.completed .step-progress-line {
+  background: var(--primary-light);
+}
+
+.step-progress-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-progress-item.active .step-progress-label {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.step-progress-item.completed .step-progress-label {
+  color: var(--text-secondary);
+}
+
+/* Wizard navigation buttons */
+.step-nav {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.step-nav .btn {
+  flex: 1;
+}
+
+.btn-back {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.btn-back:hover {
+  background: var(--bg);
+  border-color: var(--text-muted);
+}
+
+/* Advanced options toggle */
+.advanced-toggle-wrap {
+  margin-bottom: 12px;
+}
+
+.advanced-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all var(--transition);
+  touch-action: manipulation;
+}
+
+.advanced-toggle-btn:hover {
+  border-color: var(--text-muted);
+  color: var(--text-secondary);
+  background: var(--bg);
+}
+
+.advanced-toggle-btn .chevron-sm {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--transition);
+}
+
+.advanced-toggle-btn.open .chevron-sm {
+  transform: rotate(90deg);
+}
+
+.advanced-content {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height .3s ease, opacity .2s ease, margin .3s ease;
+  margin-top: 0;
+}
+
+.advanced-content.open {
+  max-height: 800px;
+  opacity: 1;
+  margin-top: 10px;
+}
+
+/* Loading progress detail */
+#loading-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-weight: 400;
+}
+
+/* Step completion badge on the header */
+.step.completed .step-header .step-indicator::after {
+  content: '✓' !important;
+  font-size: 14px !important;
+}
+.step.completed .step-header .step-indicator span {
+  display: none !important;
+}
+
+/* Status badge on step headers — "Laden", "Index", etc. */
+.step-status-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--primary-bg);
+  color: var(--primary);
+  margin-left: auto;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.step.active .step-status-badge {
+  background: var(--primary);
+  color: white;
+  opacity: 1;
+}
+
+.step.completed .step-status-badge {
+  opacity: 0.5;
+}
+
+/* Step summary text below the progress bar */
+.step-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 20px 4px;
+  font-style: italic;
+}
+
+.step-summary strong {
+  color: var(--text-secondary);
+  font-weight: 600;
 }

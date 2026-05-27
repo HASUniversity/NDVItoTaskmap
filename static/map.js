@@ -156,18 +156,40 @@ function createLayerToggleButton(container, panel) {
 }
 
 /**
- * Sets the min / mid / max labels below the NDVI colour ramp gradient.
+ * Generates a CSS linear-gradient string that exactly matches the 9-stop
+ * diverging colour ramp used by ndviToRGB() / ndviToColor() in ndvi.js.
+ * The gradient always spans the full [stop₀, stop₈] colour range so the
+ * legend colours are consistent with the map overlay regardless of the
+ * current scaleMin / scaleMax labels.
+ * @returns {string} CSS linear-gradient value, e.g. "linear-gradient(to right, #b40000, …)"
+ */
+function generateNdviGradientCss() {
+  // These 9 stops MUST match ndviToRGB() in ndvi.js exactly.
+  var stops = [
+    '#b40000', '#e63c00', '#ff9600', '#ffdc00',
+    '#b4e632', '#50c828', '#14a014', '#006e0a', '#003c00'
+  ];
+  return 'linear-gradient(to right, ' + stops.join(', ') + ')';
+}
+
+/**
+ * Sets the min / mid / max labels below the NDVI colour ramp gradient,
+ * AND synchronises the gradient colours to match ndviToRGB() exactly.
  * Called after the first NDVI render and after parcel clipping.
  * @param {number} minValue - Minimum VI value of the current display range.
  * @param {number} maxValue - Maximum VI value of the current display range.
  */
 export function setLegendLabels(minValue, maxValue) {
-  const mid = ((minValue + maxValue) / 2).toFixed(2);
-  const markup = '<span>' + minValue.toFixed(2) + '</span><span>' + mid + '</span><span>' + maxValue.toFixed(2) + '</span>';
-  ['legend-labels', 'mobile-legend-labels'].forEach(function (id) {
-    const el = document.getElementById(id);
-    if (el) el.innerHTML = markup;
-  });
+  var mid = ((minValue + maxValue) / 2).toFixed(2);
+  var markup = '<span>' + minValue.toFixed(2) + '</span><span>' + mid + '</span><span>' + maxValue.toFixed(2) + '</span>';
+  var labelEl = document.getElementById('legend-labels');
+  if (labelEl) labelEl.innerHTML = markup;
+  // Sync the gradient colours to match ndviToRGB exactly
+  var gradientCss = generateNdviGradientCss();
+  var gradientEls = document.querySelectorAll('.legend-gradient');
+  for (var gi = 0; gi < gradientEls.length; gi++) {
+    gradientEls[gi].style.background = gradientCss;
+  }
 }
 
 const LayerControlClass = L.Control.extend({
@@ -196,9 +218,9 @@ const LayerControlClass = L.Control.extend({
       '<label class="ulc-radio"><input type="radio" name="ahn" value="dsm"> <span data-i18n="lcAhnDsm">\uD83C\uDFD7 DSM (oppervlak)</span></label>' +
       '<div class="ulc-sep ulc-ndvi-section" style="display:none"></div>' +
       '<div class="ulc-ndvi-section" style="display:none">' +
-        '<div class="ulc-section-title" id="mobile-legend-title">NDVI</div>' +
+        '<div class="ulc-section-title" id="legend-title">NDVI</div>' +
         '<div class="legend-gradient"></div>' +
-        '<div class="legend-labels" id="mobile-legend-labels"><span data-i18n="legendLow">' + t('legendLow') + '</span><span></span><span data-i18n="legendHigh">' + t('legendHigh') + '</span></div>' +
+        '<div class="legend-labels" id="legend-labels"><span>-0.20</span><span>0.40</span><span>1.00</span></div>' +
       '</div>' +
       '<div id="legend-parcel" style="display:none">' +
         '<div class="legend-parcel-sep"></div>' +
@@ -226,43 +248,48 @@ const LayerControlClass = L.Control.extend({
       });
     });
 
-    const overlayMap = {};
-    panel.addEventListener('change', function (e) {
-      const cb = e.target;
-      if (!cb.dataset.layer) return;
-      const key = cb.dataset.layer;
-      const overlay = overlayMap[key];
-      if (!overlay) return;
-      if (cb.checked) map.addLayer(overlay); else map.removeLayer(overlay);
-      if (key === 'percelen') {
-        const selCb = panel.querySelector('input[data-layer="selectie"]');
-        if (selCb && selCb.checked !== cb.checked) {
-          selCb.checked = cb.checked;
-          if (overlayMap.selectie) {
-            if (cb.checked) map.addLayer(overlayMap.selectie);
-            else map.removeLayer(overlayMap.selectie);
+    /**
+     * Map of data-layer keys → Leaflet layer group.
+     * Used by the direct change listeners below.
+     */
+    const layerByKey = {
+      ndvi:      ndviOverlay,
+      taakkaart: gridOverlay,
+      percelen:  brpOverlay,
+      selectie:  selectionOverlay,
+    };
+
+    /**
+     * Direct change listener on every layer checkbox.
+     * Avoids event-delegation pitfalls caused by Leaflet's
+     * disableClickPropagation on the container element.
+     */
+    panel.querySelectorAll('input[data-layer]').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        var key = this.dataset.layer;
+        var overlay = layerByKey[key];
+        if (!overlay) return;
+        if (this.checked) map.addLayer(overlay); else map.removeLayer(overlay);
+
+        // Keep "selectie" in sync when "percelen" is toggled
+        if (key === 'percelen') {
+          var selCb = panel.querySelector('input[data-layer="selectie"]');
+          if (selCb && selCb.checked !== this.checked) {
+            selCb.checked = this.checked;
+            if (layerByKey.selectie) {
+              if (this.checked) map.addLayer(layerByKey.selectie);
+              else map.removeLayer(layerByKey.selectie);
+            }
           }
         }
-      }
+      });
     });
 
-    div._overlayMap = overlayMap;
     return div;
   }
 });
 
 export const layerControlInstance = new LayerControlClass().addTo(map);
-
-// Wire overlay references into the control
-(function () {
-  const om = layerControlInstance.getContainer()._overlayMap;
-  if (om) {
-    om.ndvi      = ndviOverlay;
-    om.taakkaart = gridOverlay;
-    om.percelen  = brpOverlay;
-    om.selectie  = selectionOverlay;
-  }
-})();
 
 export function syncLayerControlLayout() {
   const container = layerControlInstance && layerControlInstance.getContainer();
@@ -299,13 +326,18 @@ export function syncMobilePaneToggle() {
 export const legend = { addTo: function () { return this; } };
 
 export function showLegendInPanel() {
-  const dl = document.getElementById('desktop-legend');
-  if (dl) dl.classList.remove('hidden');
-  const title = document.getElementById('desktop-legend-title');
+  var title = document.getElementById('legend-title');
   if (title) title.textContent = state.selectedVI || 'NDVI';
-  const mobileTitle = document.getElementById('mobile-legend-title');
-  if (mobileTitle) mobileTitle.textContent = state.selectedVI || 'NDVI';
-  document.querySelectorAll('.ulc-ndvi-section').forEach(el => { el.style.display = ''; });
+  // Sync the gradient to match ndviToRGB exactly (replaces the CSS fallback)
+  var gradientCss = generateNdviGradientCss();
+  var gradientEls = document.querySelectorAll('.legend-gradient');
+  for (var gi = 0; gi < gradientEls.length; gi++) {
+    gradientEls[gi].style.background = gradientCss;
+  }
+  // Show the NDVI section in ULC panel (both desktop and mobile)
+  document.querySelectorAll('.ulc-ndvi-section').forEach(function (el) {
+    el.style.display = '';
+  });
 }
 
 export function updateLegendCrop(feature, byYear) {

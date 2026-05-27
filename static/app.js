@@ -22,6 +22,12 @@ state.classes = defaultClasses();
 renderClasses();
 activateStep(1);
 
+// Initialiseer de eenheid-hint tekst bij het laden
+const unitSelectInit = document.querySelector('#unit-select');
+if (unitSelectInit) {
+  unitSelectInit.dispatchEvent(new Event('change'));
+}
+
 // Prevent slider interactions from bubbling to map drag handlers
 [
   document.querySelector('#resolution-slider'),
@@ -33,6 +39,10 @@ activateStep(1);
     slider.addEventListener(eventName, function (e) { e.stopPropagation(); });
   });
 });
+
+// Initialiseer laagcontrol en mobiele paneel status
+syncLayerControlLayout();
+syncMobilePaneToggle();
 
 // Mobile sidebar toggle
 (function () {

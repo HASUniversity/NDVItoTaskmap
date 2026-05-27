@@ -210,7 +210,21 @@ function buildISOXMLZip(geojson, name, unit) {
       gridBinFinal[(numRows - 1 - r) * numCols + c] = gridBin[r * numCols + c];
 
   const fileLength = numRows * numCols;
-  const ddi = (unit === 'L/ha' || unit === 'm\u00b3/ha') ? '0001' : '0007';
+  const ddiMap = {
+    'kg/ha':     '0005',
+    'g/ha':      '0005',
+    't/ha':      '0005',
+    'L/ha':      '0001',
+    'mL/ha':     '0001',
+    'm\u00b3/ha': '0022',
+    'kg/m\u00b2': '0023',
+    'L/m\u00b2':  '0022',
+    'zaden/ha':  '0015',
+    'stuks/ha':  '0016',
+    'doses/ha':  '0019',
+    'eenheden/ha':'0007',
+  };
+  const ddi = ddiMap[unit] || '0007';
   const tznXML = tznList.map(tz =>
     '    <TZN A="' + tz.code + '" B="' + escapeXml(tz.label) + '">\n' +
     '      <PDV A="' + ddi + '" B="' + Math.round(tz.rate * 100) + '" C="PDT1"/>\n    </TZN>'
@@ -289,12 +303,12 @@ function _buildZipBlob(files) {
   files.forEach(function (f) {
     const nm = enc.encode(f.name), crc = _crc32(f.data), sz = f.data.length;
     const lh = new DataView(new ArrayBuffer(30 + nm.length));
-    lh.setUint32(0, 0x04034b50, false); lh.setUint16(4, 20, true);
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true);
     lh.setUint32(14, crc, true); lh.setUint32(18, sz, true); lh.setUint32(22, sz, true);
     lh.setUint16(26, nm.length, true);
     new Uint8Array(lh.buffer).set(nm, 30);
     const cd = new DataView(new ArrayBuffer(46 + nm.length));
-    cd.setUint32(0, 0x02014b50, false);
+    cd.setUint32(0, 0x02014b50, true);
     cd.setUint16(4, 20, true); cd.setUint16(6, 20, true);
     cd.setUint32(16, crc, true); cd.setUint32(20, sz, true); cd.setUint32(24, sz, true);
     cd.setUint16(28, nm.length, true); cd.setUint32(42, off, true);
@@ -303,12 +317,13 @@ function _buildZipBlob(files) {
     cparts.push(new Uint8Array(cd.buffer));
     off += 30 + nm.length + sz;
   });
+  const cdOffset = off;
   const cdSz = cparts.reduce((s, p) => s + p.length, 0);
   const eocd = new DataView(new ArrayBuffer(22));
-  eocd.setUint32(0, 0x06054b50, false);
+  eocd.setUint32(0, 0x06054b50, true);
   eocd.setUint16(8, files.length, true); eocd.setUint16(10, files.length, true);
-  eocd.setUint32(12, cdSz, true); eocd.setUint32(16, off, true);
-  return new Blob(lparts.concat(cparts).concat([new Uint8Array(eocd.buffer)]), { type: 'application/zip' });
+  eocd.setUint32(12, cdSz, true); eocd.setUint32(16, cdOffset, true);
+  return new Blob([_concat([...lparts, ...cparts, new Uint8Array(eocd.buffer)])], { type: 'application/zip' });
 }
 
 // ==========================================
@@ -434,4 +449,254 @@ function buildShapefileZip(geojson, name) {
     { name: name + '.dbf', data: new Uint8Array(dbfBuf) },
     { name: name + '.prj', data: prj },
   ]);
+}
+
+// ==========================================
+// NDVI GEOTIFF EXPORT (clipped to selected parcels)
+// ==========================================
+const exportNdviTifBtn = document.querySelector('#export-ndvi-tif-btn');
+if (exportNdviTifBtn) {
+  exportNdviTifBtn.addEventListener('click', function () {
+    if (!state.ndviGrid || !state.georaster) { toast(t('toastNoNDVI'), true); return; }
+    if (!state.selectedParcels || state.selectedParcels.length === 0) {
+      toast(t('toastNdviTiffNeedParcels'), true); return;
+    }
+    try {
+      // Base the filename on the original source raster, not the task-map
+      // export name — this download is a clip of the *input*, not the task map.
+      const src = state.sourceFileName || 'ndvi';
+      const baseName = src.replace(/\.(tiff?|tif)$/i, '');
+      const name = baseName + '_NDVI_clip';
+      const blob = buildClippedNdviGeoTIFF(state.selectedParcels);
+      if (!blob) { toast(t('toastNdviTiffEmpty'), true); return; }
+      _triggerDownload(blob, name + '.tif');
+      toast(t('toastNdviTiffDownload'));
+    } catch (err) {
+      console.error(err);
+      toast(tf('toastExportError', err.message), true);
+    }
+  });
+}
+
+/**
+ * Builds a single-band Float32 GeoTIFF Blob containing the computed NDVI
+ * values clipped to the union of the supplied parcel geometries.
+ *
+ * The output is cropped to the parcel bounding box (intersected with the
+ * raster bounds) and uses the raster CRS (`state.geotiffEPSG`).  Pixels
+ * outside the parcels or without a valid NDVI value are written as NaN
+ * with `GDAL_NODATA="nan"` for downstream tooling.
+ *
+ * @param {object[]} parcels - Selected GeoJSON parcel features (EPSG:4326).
+ * @returns {Blob|null} GeoTIFF blob, or null when no pixels intersect.
+ */
+function buildClippedNdviGeoTIFF(parcels) {
+  const gr = state.georaster;
+  const ndviGrid = state.ndviGrid;
+  const epsg = state.geotiffEPSG || 'EPSG:4326';
+  const w = gr.width, h = gr.height;
+  const pxW = gr.pixelWidth;
+  const pxH = Math.abs(gr.pixelHeight);
+
+  // Reproject each parcel ring to the raster CRS and find pixel-space bbox.
+  const ringsPx = [];                 // rings in pixel coordinates (col, row)
+  let pc0 = Infinity, pr0 = Infinity, pc1 = -Infinity, pr1 = -Infinity;
+  parcels.forEach(function (parcel) {
+    const geom = parcel.geometry || parcel;
+    let polyRings = [];
+    if (geom.type === 'Polygon') polyRings = geom.coordinates;
+    else if (geom.type === 'MultiPolygon') {
+      for (let mp = 0; mp < geom.coordinates.length; mp++) {
+        polyRings = polyRings.concat(geom.coordinates[mp]);
+      }
+    } else return;
+    polyRings.forEach(function (ring) {
+      if (!ring || ring.length < 3) return;
+      const pxRing = [];
+      for (let i = 0; i < ring.length; i++) {
+        let cx = ring[i][0], cy = ring[i][1];
+        if (epsg && epsg !== 'EPSG:4326') {
+          try { const pp = proj4('EPSG:4326', epsg, [cx, cy]); cx = pp[0]; cy = pp[1]; }
+          catch (e) { return; }
+        }
+        const pc = (cx - gr.xmin) / pxW;
+        const pr = (gr.ymax - cy) / pxH;
+        pxRing.push([pc, pr]);
+        if (pc < pc0) pc0 = pc; if (pc > pc1) pc1 = pc;
+        if (pr < pr0) pr0 = pr; if (pr > pr1) pr1 = pr;
+      }
+      if (pxRing.length >= 3) ringsPx.push(pxRing);
+    });
+  });
+  if (ringsPx.length === 0) return null;
+
+  // Clamp the crop window to the raster grid and align to integer pixels.
+  const col0 = Math.max(0, Math.floor(pc0));
+  const row0 = Math.max(0, Math.floor(pr0));
+  const col1 = Math.min(w, Math.ceil(pc1));
+  const row1 = Math.min(h, Math.ceil(pr1));
+  const cropW = col1 - col0;
+  const cropH = row1 - row0;
+  if (cropW <= 0 || cropH <= 0) return null;
+
+  // Rasterise the parcel mask via an off-screen canvas, offset by (col0,row0).
+  const maskCanvas = document.createElement('canvas');
+  maskCanvas.width = cropW; maskCanvas.height = cropH;
+  const mctx = maskCanvas.getContext('2d');
+  mctx.fillStyle = '#fff';
+  mctx.beginPath();
+  ringsPx.forEach(function (ring) {
+    for (let i = 0; i < ring.length; i++) {
+      const x = ring[i][0] - col0, y = ring[i][1] - row0;
+      if (i === 0) mctx.moveTo(x, y); else mctx.lineTo(x, y);
+    }
+    mctx.closePath();
+  });
+  mctx.fill('evenodd');
+  const mdata = mctx.getImageData(0, 0, cropW, cropH).data;
+
+  // Compose the float32 pixel buffer.
+  const out = new Float32Array(cropW * cropH);
+  let kept = 0;
+  for (let r = 0; r < cropH; r++) {
+    const srcRow = (row0 + r) * w;
+    const dstRow = r * cropW;
+    for (let c = 0; c < cropW; c++) {
+      const insideMask = mdata[((r * cropW) + c) << 2] > 0;
+      const v = insideMask ? ndviGrid[srcRow + (col0 + c)] : NaN;
+      if (!isNaN(v)) { out[dstRow + c] = v; kept++; }
+      else            { out[dstRow + c] = NaN; }
+    }
+  }
+  if (kept === 0) return null;
+
+  // Compute the geo-anchor for the cropped raster (top-left corner).
+  const originX = gr.xmin + col0 * pxW;
+  const originY = gr.ymax - row0 * pxH;
+
+  // Resolve EPSG code & projection type.
+  const epsgNum = parseInt(String(epsg).replace(/^EPSG:/i, ''), 10) || 4326;
+  const isGeographic = epsgNum === 4326 || epsgNum === 4979;
+
+  return _buildSingleBandFloat32GeoTIFF(
+    out, cropW, cropH, originX, originY, pxW, pxH, epsgNum, isGeographic
+  );
+}
+
+/**
+ * Writes a minimal little-endian GeoTIFF with a single Float32 strip,
+ * the GeoKey directory needed for georeferencing, and GDAL_NODATA="nan".
+ * No external library dependency.
+ *
+ * @param {Float32Array} pixels       - Row-major pixel buffer, length w*h.
+ * @param {number} width
+ * @param {number} height
+ * @param {number} originX            - Map X of the top-left pixel corner.
+ * @param {number} originY            - Map Y of the top-left pixel corner.
+ * @param {number} pxW                - Pixel width in map units.
+ * @param {number} pxH                - Pixel height in map units (positive).
+ * @param {number} epsgNum            - EPSG numeric code.
+ * @param {boolean} isGeographic      - True for geographic CRS (EPSG:4326 …).
+ * @returns {Blob} GeoTIFF (image/tiff) blob.
+ */
+function _buildSingleBandFloat32GeoTIFF(pixels, width, height, originX, originY, pxW, pxH, epsgNum, isGeographic) {
+  // Tag layout (sorted by tag id, required by TIFF spec).
+  // Tag types: 3=SHORT, 4=LONG, 12=DOUBLE, 2=ASCII
+  const NUM_ENTRIES = 15;
+  const IFD_OFFSET = 8;
+  const IFD_SIZE   = 2 + NUM_ENTRIES * 12 + 4;      // header bytes
+  let extOff = IFD_OFFSET + IFD_SIZE;
+
+  // External (non-inline) values, allocated sequentially after the IFD.
+  const modelPixelScale = new Float64Array([pxW, pxH, 0]);
+  const modelTiepoint   = new Float64Array([0, 0, 0, originX, originY, 0]);
+
+  // GeoKeyDirectory: header (4 SHORTs) + 3 keys × 4 SHORTs = 16 SHORTs.
+  const geoKeyCount = 3;
+  const geoKeyDir = new Uint16Array(4 + geoKeyCount * 4);
+  geoKeyDir[0] = 1; geoKeyDir[1] = 1; geoKeyDir[2] = 0; geoKeyDir[3] = geoKeyCount;
+  // GTModelTypeGeoKey (1024) — 1=Projected, 2=Geographic.
+  geoKeyDir[4] = 1024; geoKeyDir[5] = 0; geoKeyDir[6] = 1; geoKeyDir[7] = isGeographic ? 2 : 1;
+  // GTRasterTypeGeoKey (1025) — 1=PixelIsArea.
+  geoKeyDir[8] = 1025; geoKeyDir[9] = 0; geoKeyDir[10] = 1; geoKeyDir[11] = 1;
+  // EPSG key.
+  geoKeyDir[12] = isGeographic ? 2048 : 3072;
+  geoKeyDir[13] = 0; geoKeyDir[14] = 1; geoKeyDir[15] = epsgNum;
+
+  const mpsOffset = extOff;                            extOff += modelPixelScale.byteLength;
+  const mtpOffset = extOff;                            extOff += modelTiepoint.byteLength;
+  const gkdOffset = extOff;                            extOff += geoKeyDir.byteLength;
+  // GDAL_NODATA "nan\0" — 4 ASCII bytes — fits inline, no external storage.
+  // Pad external area to even byte boundary before pixel data (TIFF best practice).
+  if (extOff & 1) extOff += 1;
+  const pixelOffset = extOff;
+  const pixelBytes  = width * height * 4;
+  const totalBytes  = pixelOffset + pixelBytes;
+
+  const buf = new ArrayBuffer(totalBytes);
+  const dv  = new DataView(buf);
+  const u8  = new Uint8Array(buf);
+  const LE  = true;
+
+  // ── TIFF header ───────────────────────────────────────────────
+  dv.setUint16(0, 0x4949, LE);  // "II" little-endian
+  dv.setUint16(2, 42, LE);      // TIFF magic
+  dv.setUint32(4, IFD_OFFSET, LE);
+
+  // ── IFD ───────────────────────────────────────────────────────
+  dv.setUint16(IFD_OFFSET, NUM_ENTRIES, LE);
+  let p = IFD_OFFSET + 2;
+  function writeEntry(tag, type, count, valueWriter) {
+    dv.setUint16(p, tag, LE);
+    dv.setUint16(p + 2, type, LE);
+    dv.setUint32(p + 4, count, LE);
+    valueWriter(p + 8);
+    p += 12;
+  }
+  function inlineShort(value) { return function (off) { dv.setUint16(off, value, LE); dv.setUint16(off + 2, 0, LE); }; }
+  function inlineLong(value)  { return function (off) { dv.setUint32(off, value, LE); }; }
+  function inlineOffset(off2) { return function (off) { dv.setUint32(off, off2, LE); }; }
+
+  writeEntry(256, 4, 1, inlineLong(width));            // ImageWidth
+  writeEntry(257, 4, 1, inlineLong(height));           // ImageLength
+  writeEntry(258, 3, 1, inlineShort(32));              // BitsPerSample
+  writeEntry(259, 3, 1, inlineShort(1));               // Compression — none
+  writeEntry(262, 3, 1, inlineShort(1));               // PhotometricInterpretation — BlackIsZero
+  writeEntry(273, 4, 1, inlineLong(pixelOffset));      // StripOffsets
+  writeEntry(277, 3, 1, inlineShort(1));               // SamplesPerPixel
+  writeEntry(278, 4, 1, inlineLong(height));           // RowsPerStrip
+  writeEntry(279, 4, 1, inlineLong(pixelBytes));       // StripByteCounts
+  writeEntry(284, 3, 1, inlineShort(1));               // PlanarConfiguration — chunky
+  writeEntry(339, 3, 1, inlineShort(3));               // SampleFormat — IEEE float
+  writeEntry(33550, 12, 3, inlineOffset(mpsOffset));   // ModelPixelScale
+  writeEntry(33922, 12, 6, inlineOffset(mtpOffset));   // ModelTiepoint
+  writeEntry(34735, 3, geoKeyDir.length, inlineOffset(gkdOffset)); // GeoKeyDirectory
+  // GDAL_NODATA — "nan\0", 4 ASCII bytes, inline.
+  writeEntry(42113, 2, 4, function (off) {
+    u8[off]     = 0x6E;   // 'n'
+    u8[off + 1] = 0x61;   // 'a'
+    u8[off + 2] = 0x6E;   // 'n'
+    u8[off + 3] = 0x00;
+  });
+
+  // Next IFD offset = 0 (no further images).
+  dv.setUint32(p, 0, LE);
+
+  // ── External value blocks ─────────────────────────────────────
+  for (let i = 0; i < modelPixelScale.length; i++) {
+    dv.setFloat64(mpsOffset + i * 8, modelPixelScale[i], LE);
+  }
+  for (let i = 0; i < modelTiepoint.length; i++) {
+    dv.setFloat64(mtpOffset + i * 8, modelTiepoint[i], LE);
+  }
+  for (let i = 0; i < geoKeyDir.length; i++) {
+    dv.setUint16(gkdOffset + i * 2, geoKeyDir[i], LE);
+  }
+
+  // ── Pixel data (row-major Float32) ────────────────────────────
+  for (let i = 0; i < pixels.length; i++) {
+    dv.setFloat32(pixelOffset + i * 4, pixels[i], LE);
+  }
+
+  return new Blob([buf], { type: 'image/tiff' });
 }

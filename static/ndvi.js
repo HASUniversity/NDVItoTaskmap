@@ -228,16 +228,22 @@ export function displayNDVI() {
     console.log('[Stretch] p2=' + p2.toFixed(3) + ' p98=' + p98.toFixed(3) + ' scale=' + scaleMin.toFixed(3) + '..' + scaleMax.toFixed(3));
   }
 
+  // Build histogram over the actual data range so autoClassifyFromData()
+  // gets meaningful bins, not a sparse -0.2..1.0 range.
+  const histMin = ndviCount > 0 ? ndviMin : scaleMin;
+  const histMax = ndviCount > 0 ? ndviMax : scaleMax;
+  const histRange = (histMax - histMin) || 0.01;
+
   const HIST_BINS = 100;
   const histCounts = new Float32Array(HIST_BINS);
   for (let hi = 0; hi < ndviGrid.length; hi++) {
     const hv = ndviGrid[hi];
     if (!isNaN(hv)) {
-      const bi = Math.floor((hv - scaleMin) / (scaleMax - scaleMin) * HIST_BINS);
+      const bi = Math.floor((hv - histMin) / histRange * HIST_BINS);
       histCounts[Math.max(0, Math.min(HIST_BINS - 1, bi))]++;
     }
   }
-  state.ndviHistogramData = { counts: histCounts, min: scaleMin, max: scaleMax };
+  state.ndviHistogramData = { counts: histCounts, min: histMin, max: histMax };
   state.ndviScaleMin = scaleMin;
   state.ndviScaleMax = scaleMax;
 
@@ -403,9 +409,25 @@ export function clipNDVIToParcel(parcels) {
     }
   }
 
+  // Save the mask so renderClassifiedNDVI() can re-use it later
+  state.ndviMaskData = mask;
+  state.ndviMaskParcels = parcels;
+
   const vals = [];
   for (let vi = 0; vi < ndviGrid.length; vi++) { if (mask[vi] && !isNaN(ndviGrid[vi])) vals.push(ndviGrid[vi]); }
   if (vals.length === 0) { toast(t('toastNoValidNDVI'), 'warn'); return; }
+
+  // Use the actual data range for the histogram so autoClassifyFromData()
+  // gets meaningful bins instead of a sparse range like -0.2..1.0.
+  let clipMin = Infinity, clipMax = -Infinity;
+  for (let vi = 0; vi < ndviGrid.length; vi++) {
+    if (!mask[vi]) continue;
+    const hv = ndviGrid[vi];
+    if (!isNaN(hv)) { if (hv < clipMin) clipMin = hv; if (hv > clipMax) clipMax = hv; }
+  }
+  if (clipMin === Infinity) { clipMin = -0.2; clipMax = 1.0; }
+  const histMin = clipMin, histMax = clipMax;
+  const histRange = histMax - histMin || 0.01;
 
   const scaleMin = (state.ndviScaleMin != null) ? state.ndviScaleMin : -0.2;
   const scaleMax = (state.ndviScaleMax != null) ? state.ndviScaleMax : 1.0;
@@ -416,11 +438,12 @@ export function clipNDVIToParcel(parcels) {
     if (!mask[hi]) continue;
     const hv = ndviGrid[hi];
     if (!isNaN(hv)) {
-      const bi = Math.floor((hv - scaleMin) / (scaleMax - scaleMin) * HIST_BINS);
+      const bi = Math.floor((hv - histMin) / histRange * HIST_BINS);
       histCounts[Math.max(0, Math.min(HIST_BINS - 1, bi))]++;
     }
   }
-  state.ndviHistogramData = { counts: histCounts, min: scaleMin, max: scaleMax };
+  state.ndviHistogramData = { counts: histCounts, min: histMin, max: histMax };
+  console.log('[Clip] histogram range=' + histMin.toFixed(3) + '..' + histMax.toFixed(3) + ' totalPixels=' + vals.length);
 
   const canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
@@ -466,16 +489,88 @@ export function clipNDVIToParcel(parcels) {
 }
 
 // ==========================================
-// AUTO CLASSIFY
+// AUTO CLASSIFY — multiple methods
 // ==========================================
+
 /**
- * Divides the current VI histogram into `state.classes.length` equal-area
- * buckets by walking the cumulative bin count.  Updates `state.classes[].min`
- * and `.max` in place, then dispatches the `ndvi:autoclassify` CustomEvent
- * so taskmap.js can re-render without creating a circular import.
+ * Dispatches to the selected classification method.
+ * Called automatically on parcel select and when the method dropdown changes.
  */
 export function autoClassifyFromData() {
-  const { t, tf } = window;
+  const method = state.classificationMethod || 'quantile';
+  switch (method) {
+    case 'equal-interval': return equalIntervalClassify();
+    case 'jenks':          return jenksNaturalBreaks();
+    case 'std-dev':        return stdDevClassify();
+    case 'geometric':      return geometricIntervalClassify();
+    case 'pretty':         return prettyBreaksClassify();
+    case 'quantile':
+    default:               return quantileClassify();
+  }
+}
+
+/**
+ * Shared helper: reconstructs approximated data values from the histogram
+ * bins (weighted by count) so that algorithms like Jenks can work on them.
+ * Subsamples when the total pixel count exceeds `MAX_SAMPLES` to keep the
+ * downstream O(k·n²) DP tractable and avoid freezing the browser.
+ * @param {number} [maxSamples=2000] - Maximum number of values to generate.
+ * @returns {{ sorted: number[], data: object }|null}
+ */
+function _histogramToValues(maxSamples) {
+  if (maxSamples === undefined) maxSamples = 2000;
+  const data = state.ndviHistogramData;
+  if (!data) { console.warn('[Classify] No histogram data'); return null; }
+  const counts = data.counts, n = counts.length;
+  let total = 0;
+  for (let i = 0; i < n; i++) total += counts[i];
+  if (!total) { console.warn('[Classify] Zero total counts'); return null; }
+  const values = [];
+  // Subsample when the dataset is too large for the O(k·n²) Jenks DP
+  const step = total > maxSamples ? Math.ceil(total / maxSamples) : 1;
+  let sampleIdx = 0;
+  for (let i = 0; i < n; i++) {
+    if (!counts[i]) continue;
+    const binVal = data.min + (i + 0.5) / n * (data.max - data.min);
+    for (let j = 0; j < counts[i]; j++) {
+      sampleIdx++;
+      if (step > 1 && (sampleIdx % step) !== 0) continue;
+      values.push(binVal);
+    }
+  }
+  console.log('[HistToValues] total=' + total + ' samples=' + values.length + ' step=' + step);
+  return { sorted: values.sort((a, b) => a - b), data };
+}
+
+/**
+ * Applies the breaks to state.classes and dispatches the re-render event.
+ * @param {number[]} bounds - Array of class boundaries (length = numCls + 1)
+ * @param {string}   label  - Classification method label for console
+ */
+function _applyBreaks(bounds, methodKey) {
+  const { t } = window;
+  const methodNames = {
+    quantile:       t('cmQuantile'),
+    'equal-interval': t('cmEqualInterval'),
+    jenks:          t('cmJenks'),
+    'std-dev':      t('cmStdDev'),
+    geometric:      t('cmGeometric'),
+    pretty:         t('cmPretty'),
+  };
+  const label = methodNames[methodKey] || methodKey;
+  console.log('[' + label + '] bounds=' + bounds.map(b => b.toFixed(3)).join(' | '));
+  state.classes.forEach((cls, i) => { cls.min = bounds[i]; cls.max = bounds[i + 1]; });
+  window.dispatchEvent(new CustomEvent('ndvi:autoclassify'));
+  toast(state.classes.length + ' classes \u00b7 ' + label);
+}
+
+// ── Quantile (equal area) ──────────────────────────────────────────
+
+/**
+ * Divides the current VI histogram into `state.classes.length` equal-area
+ * buckets by walking the cumulative bin count.
+ */
+function quantileClassify() {
   const data = state.ndviHistogramData;
   if (!data) { toast(t('toastNoNDVI'), true); return; }
   const counts = data.counts, n = counts.length;
@@ -484,6 +579,7 @@ export function autoClassifyFromData() {
   if (!total) return;
   const numCls = state.classes.length;
   const target = total / numCls;
+  console.log('[Quantile] histMin=' + data.min.toFixed(3) + ' histMax=' + data.max.toFixed(3) + ' total=' + total + ' numCls=' + numCls + ' target=' + target.toFixed(0));
   const bounds = [data.min];
   let cum = 0;
   for (let i = 0; i < n && bounds.length < numCls; i++) {
@@ -493,8 +589,347 @@ export function autoClassifyFromData() {
   }
   while (bounds.length < numCls) bounds.push(data.max);
   bounds.push(data.max);
-  state.classes.forEach((cls, i) => { cls.min = bounds[i]; cls.max = bounds[i + 1]; });
-  // renderClasses and liveRegenerate are imported by taskmap.js; use an event
-  window.dispatchEvent(new CustomEvent('ndvi:autoclassify'));
-  toast(tf('toastClassesSet', numCls));
+  _applyBreaks(bounds, 'quantile');
+}
+
+// ── Equal Interval ─────────────────────────────────────────────────
+
+/**
+ * Divides the data range into `state.classes.length` equal-width intervals.
+ */
+function equalIntervalClassify() {
+  const data = state.ndviHistogramData;
+  if (!data) { toast(t('toastNoNDVI'), true); return; }
+  const numCls = state.classes.length;
+  const range = data.max - data.min || 0.01;
+  const interval = range / numCls;
+  const bounds = [data.min];
+  for (let i = 1; i < numCls; i++) {
+    bounds.push(Math.round((data.min + i * interval) * 1000) / 1000);
+  }
+  bounds.push(data.max);
+  _applyBreaks(bounds, 'equal-interval');
+}
+
+// ── Jenks Natural Breaks ───────────────────────────────────────────
+
+/**
+ * Ckmeans 1D optimal clustering (equivalent to Jenks Natural Breaks).
+ * Uses dynamic programming to minimise within-cluster variance.
+ * Falls back to quantile on failure.
+ */
+function jenksNaturalBreaks() {
+  const result = _histogramToValues();
+  if (!result) return;
+  const { sorted, data } = result;
+  const k = state.classes.length;
+
+  if (k <= 1) {
+    _applyBreaks([data.min, data.max], 'jenks');
+    return;
+  }
+  if (k >= sorted.length) {
+    const bounds = [data.min, ...sorted.slice(1), data.max];
+    _applyBreaks(bounds.slice(0, k + 1), 'jenks');
+    return;
+  }
+
+  // Prefix sums for O(1) sum / sum-of-squares over any sub-array
+  const n = sorted.length;
+  const prefSum = new Array(n + 1).fill(0);
+  const prefSq  = new Array(n + 1).fill(0);
+  for (let i = 0; i < n; i++) {
+    prefSum[i + 1] = prefSum[i] + sorted[i];
+    prefSq[i + 1]  = prefSq[i]  + sorted[i] * sorted[i];
+  }
+  function ss(l, r) {
+    const cnt = r - l;
+    if (cnt <= 1) return 0;
+    const s = prefSum[r] - prefSum[l];
+    const q = prefSq[r]  - prefSq[l];
+    return q - s * s / cnt;
+  }
+
+  // DP: D[i][j] = min total squared deviation for first i values in j clusters
+  // B[i][j] = partition point (last cluster starts at B[i][j])
+  const D = Array.from({ length: n + 1 }, () => Array(k + 1).fill(Infinity));
+  const B = Array.from({ length: n + 1 }, () => Array(k + 1).fill(0));
+  D[0][0] = 0;
+
+  for (let j = 1; j <= k; j++) {
+    for (let i = j; i <= n; i++) {
+      for (let x = j - 1; x < i; x++) {
+        const cost = D[x][j - 1] + ss(x, i);
+        if (cost < D[i][j]) {
+          D[i][j] = cost;
+          B[i][j] = x;
+        }
+      }
+    }
+  }
+
+  // Backtrack from the best partition
+  const bk = [sorted[n - 1]];
+  let ci = n, cj = k;
+  while (cj > 0) {
+    ci = B[ci][cj];
+    bk.push(sorted[Math.max(0, ci - 1)]);
+    cj--;
+  }
+  bk.push(data.min);
+  bk.sort((a, b) => a - b);
+  // Deduplicate adjacent identical values
+  const unique = [bk[0]];
+  for (let i = 1; i < bk.length; i++) if (bk[i] > unique[unique.length - 1]) unique.push(bk[i]);
+  // Pad or trim to exactly k+1 boundaries
+  const bounds = [data.min];
+  for (let i = 1; i < k; i++) bounds.push(unique[i] !== undefined ? unique[i] : data.max);
+  bounds.push(data.max);
+  _applyBreaks(bounds, 'jenks');
+}
+
+// ── Standard Deviation ────────────────────────────────────────────
+
+/**
+ * Divides the data range into classes based on standard deviation
+ * from the mean. Class breaks are placed at σ intervals symmetrically
+ * around the mean of the pixel values.
+ *
+ * For k classes this creates k−1 inner breaks at:
+ *   μ + z·σ   where z = [−(k−2)/2, …, −½, +½, …, +(k−2)/2]
+ *
+ * The outermost bounds are clamped to data.min / data.max.
+ * Falls back to quantile when σ is near zero.
+ */
+function stdDevClassify() {
+  const data = state.ndviHistogramData;
+  if (!data) { toast(t('toastNoNDVI'), true); return; }
+  const counts = data.counts, n = counts.length;
+  let total = 0, sum = 0;
+  for (let i = 0; i < n; i++) {
+    if (!counts[i]) continue;
+    const binVal = data.min + (i + 0.5) / n * (data.max - data.min);
+    sum += binVal * counts[i];
+    total += counts[i];
+  }
+  if (!total) return;
+  const mean = sum / total;
+  let varianceSum = 0;
+  for (let i = 0; i < n; i++) {
+    if (!counts[i]) continue;
+    const binVal = data.min + (i + 0.5) / n * (data.max - data.min);
+    varianceSum += (binVal - mean) ** 2 * counts[i];
+  }
+  const stdDev = Math.sqrt(varianceSum / total) || 0.01;
+  if (stdDev < 1e-10) { quantileClassify(); return; }
+
+  const numCls = state.classes.length;
+  if (numCls <= 1) { _applyBreaks([data.min, data.max], 'std-dev'); return; }
+
+  const innerBreaks = numCls - 1;           // number of inner boundaries
+  const offset = (innerBreaks - 1) / 2;     // centre of the z-range
+
+  const bounds = [data.min];
+  for (let i = 0; i < innerBreaks; i++) {
+    const z = i - offset;                     // e.g. −2.5, −1.5, … +2.5 for 7 cls
+    const br = mean + z * stdDev;
+    bounds.push(Math.round(Math.max(data.min, Math.min(data.max, br)) * 1000) / 1000);
+  }
+  bounds.push(data.max);
+
+  // Deduplicate adjacent identical values
+  const unique = [bounds[0]];
+  for (let i = 1; i < bounds.length; i++) {
+    if (bounds[i] > unique[unique.length - 1] + 1e-6) unique.push(bounds[i]);
+  }
+  // Pad or trim to exactly k + 1 boundaries
+  const finalBounds = [data.min];
+  for (let i = 1; i < numCls; i++) {
+    finalBounds.push(unique[i] !== undefined ? unique[i] : data.max);
+  }
+  finalBounds.push(data.max);
+  _applyBreaks(finalBounds, 'std-dev');
+}
+
+// ── Geometric Interval ────────────────────────────────────────────
+
+/**
+ * Creates class breaks based on a geometric progression so that the
+ * squared sum of per-interval coefficients of variation is minimised.
+ * Best suited for skewed data (e.g. strongly non-normal VI distributions).
+ *
+ * The algorithm uses the natural log of the data range to compute a
+ * geometric scale factor, which creates wider intervals for larger
+ * values and narrower intervals for smaller ones.
+ *
+ * Falls back to equal-interval when the range is zero or negative.
+ */
+function geometricIntervalClassify() {
+  const data = state.ndviHistogramData;
+  if (!data) { toast(t('toastNoNDVI'), true); return; }
+  const numCls = state.classes.length;
+  if (numCls <= 1) { _applyBreaks([data.min, data.max], 'geometric'); return; }
+
+  const range = data.max - data.min;
+  if (range <= 0) { equalIntervalClassify(); return; }
+
+  // Shift data to positive domain for log transform
+  const shift = data.min <= 0 ? Math.abs(data.min) + 0.001 : 0;
+  const a = data.min + shift;
+  const b = data.max + shift;
+  const ratio = Math.exp((Math.log(b) - Math.log(a)) / numCls);
+
+  const bounds = [data.min];
+  let cum = a;
+  for (let i = 1; i < numCls; i++) {
+    cum *= ratio;
+    bounds.push(Math.round(Math.max(data.min, Math.min(data.max, cum - shift)) * 1000) / 1000);
+  }
+  bounds.push(data.max);
+
+  // Deduplicate
+  const unique = [bounds[0]];
+  for (let i = 1; i < bounds.length; i++) {
+    if (bounds[i] > unique[unique.length - 1] + 1e-6) unique.push(bounds[i]);
+  }
+  const finalBounds = [data.min];
+  for (let i = 1; i < numCls; i++) {
+    finalBounds.push(unique[i] !== undefined ? unique[i] : data.max);
+  }
+  finalBounds.push(data.max);
+  _applyBreaks(finalBounds, 'geometric');
+}
+
+// ── Pretty Breaks ─────────────────────────────────────────────────
+
+/**
+ * Creates class breaks at "pretty", round-number boundaries (e.g.
+ * 0.1, 0.2, 0.3 instead of arbitrary fractional breaks).  The
+ * algorithm picks a step size that gives clean, human-readable values
+ * while keeping roughly `numCls` classes.
+ *
+ * Falls back to equal-interval when the range is zero.
+ */
+function prettyBreaksClassify() {
+  const data = state.ndviHistogramData;
+  if (!data) { toast(t('toastNoNDVI'), true); return; }
+  const numCls = state.classes.length;
+  if (numCls <= 1) { _applyBreaks([data.min, data.max], 'pretty'); return; }
+
+  const lo = data.min, hi = data.max;
+  const range = hi - lo;
+  if (range <= 0) { equalIntervalClassify(); return; }
+
+  // Determine a "nice" step size based on the range and desired number of classes
+  const roughStep = range / numCls;
+  const mag = Math.pow(10, Math.floor(Math.log10(roughStep)));
+  const norm = roughStep / mag;
+  let niceStep;
+  if (norm <= 1.5)       niceStep = 1 * mag;
+  else if (norm <= 3.5)  niceStep = 2 * mag;
+  else if (norm <= 7.5)  niceStep = 5 * mag;
+  else                   niceStep = 10 * mag;
+
+  // Round lo down, hi up to the nearest niceStep
+  const niceLo = Math.floor(lo / niceStep) * niceStep;
+  const niceHi = Math.ceil(hi / niceStep) * niceStep;
+
+  const bounds = [lo];
+  for (let b = niceLo + niceStep; b < niceHi; b += niceStep) {
+    if (b > lo && b < hi) {
+      bounds.push(Math.round(b * 1000) / 1000);
+    }
+    if (bounds.length >= numCls) break;
+  }
+  bounds.push(hi);
+
+  // Deduplicate
+  const unique = [bounds[0]];
+  for (let i = 1; i < bounds.length; i++) {
+    if (bounds[i] > unique[unique.length - 1] + 1e-6) unique.push(bounds[i]);
+  }
+  const finalBounds = [lo];
+  for (let i = 1; i < numCls; i++) {
+    finalBounds.push(unique[i] !== undefined ? unique[i] : hi);
+  }
+  finalBounds.push(hi);
+  _applyBreaks(finalBounds, 'pretty');
+}
+
+// ==========================================
+// CLASSIFIED OVERLAY
+// ==========================================
+
+/**
+ * Converts a hex colour string (e.g. '#d73027') to an { r, g, b } object.
+ * @param {string} hex
+ * @returns {{ r: number, g: number, b: number }|null}
+ */
+function hexToRgb(hex) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null;
+}
+
+/**
+ * Re-renders the NDVI / VI overlay using the current class-based colour
+ * scheme instead of the continuous colour ramp.  Every pixel is assigned
+ * the colour of the class whose [min, max) range contains its VI value.
+ *
+ * Uses the cached mask from clipNDVIToParcel (state.ndviMaskData) so that
+ * parcel clipping is preserved.  Call this whenever state.classes changes
+ * (method switch, class edit / add / remove, auto-classify).
+ */
+export function renderClassifiedNDVI() {
+  const gr = state.georaster;
+  const ndviGrid = state.ndviGrid;
+  if (!gr || !ndviGrid || !state.classes || state.classes.length === 0) return;
+
+  const w = gr.width, h = gr.height;
+  const mask = state.ndviMaskData || new Uint8Array(w * h).fill(1);
+  const classes = state.classes;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(w, h);
+  const px = imgData.data;
+
+  for (let row = 0; row < h; row++) {
+    for (let col = 0; col < w; col++) {
+      const oi = row * w + col;
+      if (!mask[oi]) continue;
+      const ndvi = ndviGrid[oi];
+      if (isNaN(ndvi)) continue;
+
+      // Find which class this pixel belongs to
+      let clsColor = null;
+      for (let c = 0; c < classes.length; c++) {
+        if (ndvi >= classes[c].min && ndvi < classes[c].max) {
+          clsColor = classes[c].color;
+          break;
+        }
+      }
+      // Values >= the last class max also get the last class colour
+      if (!clsColor && classes.length > 0) {
+        clsColor = classes[classes.length - 1].color;
+      }
+
+      if (clsColor) {
+        const rgb = hexToRgb(clsColor);
+        if (rgb) {
+          const idx = oi << 2;
+          px[idx]     = rgb.r;
+          px[idx + 1] = rgb.g;
+          px[idx + 2] = rgb.b;
+          px[idx + 3] = 217;
+        }
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+
+  ndviOverlay.clearLayers();
+  state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
+  ndviOverlay.addLayer(state.ndviLayer);
 }

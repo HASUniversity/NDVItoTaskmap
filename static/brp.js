@@ -15,7 +15,7 @@
 import { state, BRP_WFS_URL, MIN_ZOOM_BRP } from './state.js';
 import { debounce, toast, escapeHtml } from './utils.js';
 import { map, brpOverlay, selectionOverlay, clearLegendCrop, updateLegendCrop, refreshAhnOverlay, setAhnMode } from './map.js';
-import { clipNDVIToParcel, drawNDVIHistogram } from './ndvi.js';
+import { clipNDVIToParcel, drawNDVIHistogram, autoClassifyFromData } from './ndvi.js';
 import { activateStep } from './steps.js';
 import { renderClasses } from './taskmap.js';
 
@@ -244,10 +244,24 @@ export function updateSelectionDisplay(fitBounds) {
   }
 
   document.querySelector('#parcel-info').classList.remove('hidden');
+  // Auto-advance to Data Analyse (step 4) when parcels are selected.
+  if (state.ndviGrid && state.georaster) {
+    console.log('[Selection] Calling clipNDVIToParcel' + (state.classificationMethod !== 'manual' ? ' + autoClassifyFromData' : ''));
+    clipNDVIToParcel(state.selectedParcels);
+    if (state.classificationMethod !== 'manual') {
+      autoClassifyFromData();
+    }
+    // Advance to Data Analyse step if we're still on step 3
+    if (state.currentStep === 3) {
+      activateStep(4);
+    }
+  } else {
+    console.warn('[Selection] No ndviGrid or georaster - skipping clip+classify');
+  }
   renderClasses();
-  activateStep(4);
-  if (state.ndviGrid && state.georaster) clipNDVIToParcel(state.selectedParcels);
 }
+
+// "Continue → Data Analyse" handler is now in taskmap.js
 
 // ==========================================
 // MAP CLICK FALLBACK

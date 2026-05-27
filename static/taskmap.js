@@ -11,9 +11,9 @@
    =================================================== */
 
 import { state, defaultClasses } from './state.js';
-import { toast, escapeHtml, showLoading, hideLoading } from './utils.js';
+import { toast, escapeHtml, showLoading, hideLoading, setLoadingDetail } from './utils.js';
 import { map, gridOverlay } from './map.js';
-import { drawNDVIHistogram, ndviToRGB, autoClassifyFromData } from './ndvi.js';
+import { drawNDVIHistogram, ndviToRGB, autoClassifyFromData, renderClassifiedNDVI } from './ndvi.js';
 import { activateStep } from './steps.js';
 
 const { t, tf } = window;
@@ -43,7 +43,8 @@ const generateBtn      = document.querySelector('#generate-btn');
 let _liveTimer = null;
 export function liveRegenerate() {
   if (!state.selectedParcels || state.selectedParcels.length === 0) return;
-  if (state.currentStep < 4) return;
+  if (state.currentStep < 5) return;
+  if (!document.querySelector('#step-5.active')) return;
   clearTimeout(_liveTimer);
   _liveTimer = setTimeout(function () {
     try { generateTaskMap(); renderExportStats(); }
@@ -80,6 +81,49 @@ if (northSouthBtn) {
   });
 }
 
+// ==========================================
+// STEP 3 → 4: Data Analyse
+// ==========================================
+const _gotoStep4Btn = document.querySelector('#goto-step4-btn');
+if (_gotoStep4Btn) {
+  _gotoStep4Btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (!state.selectedParcels || state.selectedParcels.length === 0) {
+      toast(t('toastSelectParcels'), true);
+      return;
+    }
+    activateStep(4);
+  });
+}
+
+// ==========================================
+// STEP 4 → 5: Taakkaart
+// ==========================================
+const _gotoStep5Btn = document.querySelector('#goto-step5-btn');
+if (_gotoStep5Btn) {
+  _gotoStep5Btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (!state.selectedParcels || state.selectedParcels.length === 0) {
+      toast(t('toastSelectParcels'), true);
+      return;
+    }
+    // Herclassificeer met de gekozen methode voordat we naar de taakkaart gaan
+    if (state.classificationMethod !== 'manual' && state.ndviHistogramData) {
+      autoClassifyFromData();
+    }
+    // Stel automatisch de optimale rijrichting in als standaard
+    const angle = computeOptimalGridAngle(state.selectedParcels);
+    state.gridAngle = angle;
+    if (gridAngleSlider) gridAngleSlider.value = angle;
+    if (gridAngleValue) gridAngleValue.textContent = angle + '°';
+    if (autoAngleHint) { autoAngleHint.textContent = tf('autoAngleHintAngle', angle); autoAngleHint.style.display = ''; }
+    activateStep(5);
+    // Genereer direct een taakkaart voor live preview
+    try { generateTaskMap(); renderExportStats(); }
+    catch (e) { console.warn('Vroege generate mislukt:', e); }
+  });
+}
+
 if (autoAngleBtn) {
   autoAngleBtn.addEventListener('click', function () {
     if (!state.selectedParcels || state.selectedParcels.length === 0) {
@@ -97,8 +141,58 @@ if (autoAngleBtn) {
 
 unitSelect.addEventListener('change', function () {
   state.unit = unitSelect.value;
+  updateUnitHint(unitSelect.value);
   liveRegenerate();
 });
+
+/**
+ * Updates the unit description hint below the select element.
+ * @param {string} unit - The selected unit value.
+ */
+function updateUnitHint(unit) {
+  const hintEl = document.querySelector('#unit-hint');
+  if (!hintEl) return;
+  const hints = {
+    'kg/ha':      '\u24D8 kg/ha \u2014 vaste meststoffen, kalk & korrel (standaard)',
+    'g/ha':       '\u24D8 g/ha \u2014 sporenelementen, micro-granulaten & additieven',
+    't/ha':       '\u24D8 t/ha \u2014 organische mest, compost & bulkproducten',
+    'L/ha':       '\u24D8 L/ha \u2014 vloeibare meststoffen & gewasbescherming (standaard)',
+    'mL/ha':      '\u24D8 mL/ha \u2014 geconcentreerde vloeistoffen & vloeibare additieven',
+    'm\u00b3/ha': '\u24D8 m\u00b3/ha \u2014 drijfmest, gier & beregening (grote volumes)',
+    'kg/m\u00b2':  '\u24D8 kg/m\u00b2 \u2014 zeer precieze dosering per vierkante meter',
+    'L/m\u00b2':   '\u24D8 L/m\u00b2 \u2014 zeer precieze vloeistofdosering per m\u00b2',
+    'zaden/ha':   '\u24D8 zaden/ha \u2014 variabel zaaien op basis van NDVI',
+    'stuks/ha':   '\u24D8 stuks/ha \u2014 planten, pootgoed & bollen uitzetten',
+    'doses/ha':   '\u24D8 doses/ha \u2014 biologische middelen, entingen & behandelingen',
+    'eenheden/ha':'\u24D8 eenheden/ha \u2014 algemeen; zelf te defini\u00EBren eenheid',
+  };
+  hintEl.textContent = hints[unit] || '\u24D8 ' + unit;
+}
+
+// ==========================================
+// CLASSIFICATION METHOD
+// ==========================================
+const classMethodSelect = document.querySelector('#class-method-select');
+if (classMethodSelect) {
+  // Initialise from state (in case the value was set before the DOM was ready)
+  classMethodSelect.value = state.classificationMethod || 'quantile';
+
+  classMethodSelect.addEventListener('change', function () {
+    state.classificationMethod = classMethodSelect.value;
+    if (state.classificationMethod === 'manual') {
+      toast(t('toastClassifyManual'));
+      renderClassifiedNDVI();
+      return;
+    }
+    // Re-classify with the selected method
+    if (state.ndviHistogramData) {
+      autoClassifyFromData();
+      liveRegenerate();
+    } else {
+      toast(t('toastNoNDVI'), true);
+    }
+  });
+}
 
 // ==========================================
 // CLASS EDITOR
@@ -134,6 +228,7 @@ export function renderClasses() {
       if (inp.type === 'color') state.classes[i].color = inp.value;
       else if (field === 'name') state.classes[i].name = inp.value;
       else if (field) state.classes[i][field] = parseFloat(inp.value);
+      renderClassifiedNDVI();
       liveRegenerate();
     });
   });
@@ -142,6 +237,7 @@ export function renderClasses() {
     btn.addEventListener('click', function () {
       state.classes.splice(parseInt(btn.dataset.i), 1);
       renderClasses();
+      renderClassifiedNDVI();
       liveRegenerate();
     });
   });
@@ -153,32 +249,39 @@ addClassBtn.addEventListener('click', function () {
   const last = state.classes[state.classes.length - 1];
   state.classes.push({ name: tf('clsNewClass', state.classes.length + 1), min: last ? last.max : 0, max: 1, rate: 50, color: '#9e9e9e' });
   renderClasses();
+  renderClassifiedNDVI();
 });
 
 const autoClassifyBtn = document.querySelector('#auto-classify-btn');
-if (autoClassifyBtn) autoClassifyBtn.addEventListener('click', autoClassifyFromData);
+if (autoClassifyBtn) autoClassifyBtn.addEventListener('click', function () {
+  autoClassifyFromData();
+  renderClassifiedNDVI();
+});
 
 // Handle the auto-classify event dispatched by ndvi.js
 window.addEventListener('ndvi:autoclassify', function () {
   renderClasses();
+  renderClassifiedNDVI();
   liveRegenerate();
 });
 
 // ==========================================
 // GENERATE TASK MAP
 // ==========================================
-generateBtn.addEventListener('click', function () {
+generateBtn.addEventListener('click', function (e) {
   if (!state.selectedParcels || state.selectedParcels.length === 0) {
     toast(t('toastSelectParcels'), true); return;
   }
+  e.stopPropagation();
   showLoading(t('loadingGenerate'));
+  setLoadingDetail(state.gridSize + ' m grid \u00b7 ' + (state.selectedParcels.length) + ' percelen \u00b7 ' + state.classes.length + ' klassen');
   setTimeout(function () {
     try {
       generateTaskMap();
       hideLoading();
       toast(t('toastGenerated'));
       renderExportStats();
-      activateStep(5);
+      activateStep(6);
     } catch (err) {
       hideLoading();
       console.error(err);

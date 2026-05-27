@@ -12,9 +12,9 @@
    =================================================== */
 
 import { state } from './state.js';
-import { ensureEPSG, showLoading, hideLoading, toast } from './utils.js';
+import { ensureEPSG, showLoading, hideLoading, toast, setLoadingDetail } from './utils.js';
 import { escapeHtml } from './utils.js';
-import { displayNDVI, zoomToGeoTIFF } from './ndvi.js';
+import { displayNDVI, zoomToGeoTIFF, autoClassifyFromData } from './ndvi.js';
 import { startBRPLoading } from './brp.js';
 import { activateStep } from './steps.js';
 
@@ -52,10 +52,12 @@ async function reloadResolutionFromSlider() {
   if (!state.tiff || !state.tiffImage) return;
   const targetResolution = getRequestedResolution();
   showLoading(tf('loadingReload', targetResolution));
+  setLoadingDetail(state.sourceFileName + ' @ ' + targetResolution + ' px');
   resolutionSlider.disabled = true;
   try {
     await rebuildGeoRasterAtResolution(targetResolution);
     displayNDVI();
+    autoClassifyFromData();
     toast(tf('toastResolutionSet', targetResolution));
   } catch (err) {
     console.error(err);
@@ -188,6 +190,7 @@ fileDrop.addEventListener('drop', function (e) {
 async function handleFileUpload(file) {
   if (state.blobUrl) { URL.revokeObjectURL(state.blobUrl); state.blobUrl = null; }
   showLoading(t('loadingGeoTIFF'));
+  setLoadingDetail(file.name + ' (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)');
   try {
     const GTIFF = window.GeoTIFF;
     if (!GTIFF) throw new Error('geotiff.js niet geladen — herlaad de pagina.');
@@ -285,6 +288,7 @@ async function handleFileUpload(file) {
     state.tiff = tiff;
     state.tiffImage = image;
     state.geotiffEPSG = epsg;
+    state.sourceFileName = file.name;
 
     const rasterInfo = await rebuildGeoRasterAtResolution(getRequestedResolution());
     const { width: tw, height: th } = rasterInfo;
@@ -301,6 +305,7 @@ async function handleFileUpload(file) {
       hideLoading();
       toast(t('toastNDVIDetected'));
       displayNDVI();
+      autoClassifyFromData();
       zoomToGeoTIFF();
       activateStep(3);
       startBRPLoading();
@@ -316,6 +321,7 @@ async function handleFileUpload(file) {
       hideLoading();
       toast(t('toastRGBDetected'));
       displayNDVI();
+      autoClassifyFromData();
       zoomToGeoTIFF();
       activateStep(3);
       startBRPLoading();
@@ -461,8 +467,10 @@ computeBtn.addEventListener('click', function () {
   const bandB = vi === 'GNDVI' ? state.bandGreen : vi === 'NDRE' ? state.bandRedEdge : state.bandRed;
   if (bandA === bandB) { toast(t('toastSameBands'), true); return; }
   showLoading(tf('loadingVI', vi));
+  setLoadingDetail(state.sourceFileName + ' \u2014 ' + vi + ' @ ' + getRequestedResolution() + ' px');
   setTimeout(function () {
     displayNDVI();
+    autoClassifyFromData();
     zoomToGeoTIFF();
     hideLoading();
     toast(tf('toastVIComputed', state.selectedVI));

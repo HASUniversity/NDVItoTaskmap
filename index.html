@@ -6,7 +6,7 @@
   <title>Taakkaart Generator</title>
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🌾</text></svg>" />
   <link rel="stylesheet" href="static/vendor/leaflet.css" />
-  <link rel="stylesheet" href="static/styles.css?v=25" />
+  <link rel="stylesheet" href="static/styles.css?v=28" />
 </head>
 <body>
   <div class="app">
@@ -27,12 +27,45 @@
       </div>
 
       <div class="sidebar-steps">
+        <!-- Stappenindicator -->
+        <div class="step-progress" id="step-progress">
+          <div class="step-progress-item active" data-progress="1">
+            <div class="step-progress-dot"><span>1</span></div>
+            <span class="step-progress-label" data-i18n="step1label">Laden</span>
+            <div class="step-progress-line"></div>
+          </div>
+          <div class="step-progress-item" data-progress="2">
+            <div class="step-progress-dot"><span>2</span></div>
+            <span class="step-progress-label" data-i18n="step2label">Index</span>
+            <div class="step-progress-line"></div>
+          </div>
+          <div class="step-progress-item" data-progress="3">
+            <div class="step-progress-dot"><span>3</span></div>
+            <span class="step-progress-label" data-i18n="step3label">Percelen</span>
+            <div class="step-progress-line"></div>
+          </div>
+          <div class="step-progress-item" data-progress="4">
+            <div class="step-progress-dot"><span>4</span></div>
+            <span class="step-progress-label" data-i18n="step4label">Analyse</span>
+            <div class="step-progress-line"></div>
+          </div>
+          <div class="step-progress-item" data-progress="5">
+            <div class="step-progress-dot"><span>5</span></div>
+            <span class="step-progress-label" data-i18n="step5label">Kaart</span>
+            <div class="step-progress-line"></div>
+          </div>
+          <div class="step-progress-item" data-progress="6">
+            <div class="step-progress-dot"><span>6</span></div>
+            <span class="step-progress-label" data-i18n="step6label">Export</span>
+          </div>
+        </div>
+
         <!-- STEP 1: GeoTIFF -->
         <section class="step active" data-step="1" id="step-1">
           <div class="step-header" data-toggle="1">
             <div class="step-indicator"><span>1</span></div>
             <h2 data-i18n="step1">GeoTIFF Laden</h2>
-            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="step-status-badge" id="step1-badge" data-i18n="step1label">Laden</span>
           </div>
           <div class="step-body">
             <p class="step-desc" data-i18n="step1Desc">Upload een WebODM multispectrale GeoTIFF (odm_orthophoto.tif)</p>
@@ -55,6 +88,10 @@
                 <table id="band-info-table" style="font-size:11px;border-collapse:collapse;width:100%"></table>
               </div>
             </div>
+            <!-- Navigatie -->
+            <div class="step-nav">
+              <button class="btn btn-primary btn-next" data-next="2" data-i18n="btnNext">Volgende</button>
+            </div>
           </div>
         </section>
 
@@ -63,7 +100,7 @@
           <div class="step-header" data-toggle="2">
             <div class="step-indicator"><span>2</span></div>
             <h2 data-i18n="step2">Banden &amp; Index</h2>
-            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="step-status-badge" id="step2-badge" data-i18n="step2label">Index</span>
           </div>
           <div class="step-body">
             <p class="step-desc" id="band-desc" data-i18n="step2Desc">Selecteer de banden en vegetatie-index.</p>
@@ -78,35 +115,48 @@
                   <option value="OSAVI">OSAVI — (NIR − R) / (NIR + R + 0.16)</option>
                 </select>
               </div>
-              <div class="form-row">
-                <label for="red-band">Red band</label>
-                <select id="red-band"></select>
-              </div>
-              <div class="form-row">
-                <label for="green-band">Green band</label>
-                <select id="green-band"></select>
-              </div>
-              <div class="form-row">
-                <label for="nir-band">NIR band</label>
-                <select id="nir-band"></select>
-              </div>
-              <div class="form-row">
-                <label for="rededge-band">RedEdge band</label>
-                <select id="rededge-band"></select>
-              </div>
-              <div class="form-row">
-                <label for="stretch-ndvi" style="cursor:pointer">
-                  <input type="checkbox" id="stretch-ndvi" checked />
-                  <span data-i18n="labelStretch">Kleurschaal aanpassen aan data</span>
-                </label>
-              </div>
-              <div class="form-row" id="resolution-row">
-                <label for="resolution-slider"><span data-i18n="labelResolution">Resolutie:</span> <span id="resolution-value">1024</span> px</label>
-                <input type="range" id="resolution-slider" min="512" max="8192" step="512" value="1024" style="width:100%" />
-                <div style="display:flex;justify-content:space-between;font-size:10px;color:#888"><span data-i18n="res512">512 (snel)</span><span data-i18n="res8192">8192 (nauwkeurig)</span></div>
+              <div class="advanced-toggle-wrap">
+                <button class="advanced-toggle-btn" id="advanced-bands-toggle" type="button">
+                  <svg class="chevron-sm" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+                  <span data-i18n="advancedShow">Geavanceerde opties</span>
+                </button>
+                <div class="advanced-content" id="advanced-bands-content">
+                  <div class="form-row">
+                    <label for="red-band">Red band</label>
+                    <select id="red-band"></select>
+                  </div>
+                  <div class="form-row">
+                    <label for="green-band">Green band</label>
+                    <select id="green-band"></select>
+                  </div>
+                  <div class="form-row">
+                    <label for="nir-band">NIR band</label>
+                    <select id="nir-band"></select>
+                  </div>
+                  <div class="form-row">
+                    <label for="rededge-band">RedEdge band</label>
+                    <select id="rededge-band"></select>
+                  </div>
+                  <div class="form-row">
+                    <label for="stretch-ndvi" style="cursor:pointer">
+                      <input type="checkbox" id="stretch-ndvi" checked />
+                      <span data-i18n="labelStretch">Kleurschaal aanpassen aan data</span>
+                    </label>
+                  </div>
+                  <div class="form-row" id="resolution-row">
+                    <label for="resolution-slider"><span data-i18n="labelResolution">Resolutie:</span> <span id="resolution-value">1024</span> px</label>
+                    <input type="range" id="resolution-slider" min="512" max="8192" step="512" value="1024" style="width:100%" />
+                    <div style="display:flex;justify-content:space-between;font-size:10px;color:#888"><span data-i18n="res512">512 (snel)</span><span data-i18n="res8192">8192 (nauwkeurig)</span></div>
+                  </div>
+                </div>
               </div>
             </div>
             <button class="btn btn-primary" id="compute-ndvi-btn" data-i18n="btnComputeNDVI">Bereken index</button>
+            <!-- Navigatie -->
+            <div class="step-nav">
+              <button class="btn btn-back btn-prev" data-prev="1" data-i18n="btnBack">Vorige</button>
+              <button class="btn btn-primary btn-next" data-next="3" data-i18n="btnNext">Volgende</button>
+            </div>
           </div>
         </section>
 
@@ -115,7 +165,7 @@
           <div class="step-header" data-toggle="3">
             <div class="step-indicator"><span>3</span></div>
             <h2 data-i18n="step3">Percelen Selecteren</h2>
-            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="step-status-badge" id="step3-badge" data-i18n="step3label">Percelen</span>
           </div>
           <div class="step-body">
             <p class="step-desc" data-i18n="step3Desc">Klik op een perceel om het te selecteren of te deselecteren. Meerdere percelen zijn mogelijk.</p>
@@ -124,27 +174,82 @@
               <div class="info-row"><span class="label" data-i18n="labelArea">Totale oppervlakte:</span><span id="parcel-area"></span></div>
               <div id="parcel-list" style="margin-top:6px;max-height:240px;overflow-y:auto"></div>
               <button class="btn btn-small btn-outline" id="clear-parcels-btn" style="margin-top:8px;width:100%" data-i18n="btnClearParcels">Deselecteer alles</button>
+
+              <!-- Tussentijdse export — losse "off-ramp" voor wie alleen de geknipte NDVI wil -->
+              <div class="quick-export-card">
+                <div class="quick-export-head">
+                  <span class="quick-export-icon">📥</span>
+                  <span class="quick-export-title" data-i18n="quickExportTitle">Tussentijdse export</span>
+                </div>
+                <p class="quick-export-desc" data-i18n="quickExportDesc">Download alleen de NDVI uitsnede van de geselecteerde percelen — bruikbaar voor scouting, analyse of een ander GIS-pakket.</p>
+                <button class="btn btn-small btn-outline" id="export-ndvi-tif-btn" data-i18n="btnExportNdviTiff" title="Knip de NDVI op de selectie en exporteer als GeoTIFF in de bron-CRS">
+                  ⬇ Veld-NDVI (GeoTIFF)
+                </button>
+              </div>
             </div>
             <p class="hint" id="parcel-hint" data-i18n="parcelHint">Zoom verder in om BRP percelen te laden (zoom ≥ 14).</p>
+            <!-- Navigatie -->
+            <div class="step-nav">
+              <button class="btn btn-back btn-prev" data-prev="2" data-i18n="btnBack">Vorige</button>
+              <button class="btn btn-primary" id="goto-step4-btn" data-i18n="btnContinueToAnalysis">
+                Verder: Data analyse →
+              </button>
+            </div>
           </div>
         </section>
 
-        <!-- STEP 4: Taakkaart configureren -->
+        <!-- STEP 4: Data Analyse -->
         <section class="step disabled" data-step="4" id="step-4">
           <div class="step-header" data-toggle="4">
             <div class="step-indicator"><span>4</span></div>
-            <h2 data-i18n="step4">Taakkaart Instellen</h2>
-            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+            <h2 data-i18n="step4">Data Analyse</h2>
+            <span class="step-status-badge" id="step4-badge" data-i18n="step4label">Analyse</span>
           </div>
           <div class="step-body">
+
+            <div id="ndvi-histogram-wrap" style="display:none;margin-bottom:12px">
+              <div style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px" data-i18n="labelNdviDist">NDVI verdeling</div>
+              <canvas id="ndvi-histogram" height="60" style="width:100%;display:block;border-radius:4px;background:#0d1117"></canvas>
+            </div>
+
             <div class="form-row">
-              <label for="ahn-select" data-i18n="lcAHN">AHN4 Hoogte</label>
-              <select id="ahn-select">
-                <option value="off" data-i18n="lcAhnOff">Uit</option>
-                <option value="dtm" data-i18n="lcAhnDtm">DTM (maaiveld)</option>
-                <option value="dsm" data-i18n="lcAhnDsm">DSM (oppervlak)</option>
+              <label for="class-method-select" data-i18n="labelClassMethod">Classificatie methode</label>
+              <select id="class-method-select">
+                <option value="quantile" data-i18n="cmQuantile">Quantile (gelijke oppervlakte)</option>
+                <option value="equal-interval" data-i18n="cmEqualInterval">Gelijk interval</option>
+                <option value="std-dev" data-i18n="cmStdDev">Standaarddeviatie</option>
+                <option value="geometric" data-i18n="cmGeometric">Geometrisch interval</option>
+                <option value="pretty" data-i18n="cmPretty">Pretty breaks (mooie getallen)</option>
+                <option value="jenks" data-i18n="cmJenks">Natural breaks (Jenks)</option>
+                <option value="manual" data-i18n="cmManual">Handmatig</option>
               </select>
             </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <h3 class="section-title" style="margin:0" data-i18n="labelClasses">Klassen</h3>
+              <button class="btn-classify-hint" id="auto-classify-btn" data-i18n="btnAutoClassify">auto-classificeer</button>
+            </div>
+            <div id="classes-container"></div>
+            <button class="btn btn-small btn-outline" id="add-class-btn" data-i18n="btnAddClass">+ Klasse toevoegen</button>
+
+            <!-- Navigatie -->
+            <div class="step-nav" style="margin-top:16px">
+              <button class="btn btn-back btn-prev" data-prev="3" data-i18n="btnBack">Vorige</button>
+              <button class="btn btn-primary" id="goto-step5-btn" data-i18n="btnContinueToTaskmap">
+                Verder: Taakkaart instellen →
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- STEP 5: Taakkaart configureren -->
+        <section class="step disabled" data-step="5" id="step-5">
+          <div class="step-header" data-toggle="5">
+            <div class="step-indicator"><span>5</span></div>
+            <h2 data-i18n="step5">Taakkaart Instellen</h2>
+            <span class="step-status-badge" id="step5-badge" data-i18n="step5label">Kaart</span>
+          </div>
+          <div class="step-body">
 
             <div class="form-row">
               <label for="grid-size" data-i18n="labelGridSize">Gridgrootte</label>
@@ -157,11 +262,30 @@
             <div class="form-row">
               <label for="unit-select" data-i18n="labelUnit">Eenheid</label>
               <select id="unit-select">
-                <option value="kg/ha">kg/ha</option>
-                <option value="L/ha">L/ha</option>
-                <option value="m³/ha">m³/ha</option>
-                <option value="eenheden/ha" data-i18n="unitEenheden">eenheden/ha</option>
+                <optgroup label="── Massa per hectare ──">
+                  <option value="kg/ha" title="Standaard voor vaste meststoffen & kalk">kg/ha</option>
+                  <option value="g/ha" title="Voor sporenelementen & micro-granulaten">g/ha</option>
+                  <option value="t/ha" title="Voor organische mest, compost & bulkproducten">t/ha</option>
+                </optgroup>
+                <optgroup label="── Volume per hectare ──">
+                  <option value="L/ha" title="Standaard voor vloeibare meststoffen & gewasbescherming">L/ha</option>
+                  <option value="mL/ha" title="Voor geconcentreerde vloeistoffen & additieven">mL/ha</option>
+                  <option value="m³/ha" title="Voor grote volumes drijfmest & water">m³/ha</option>
+                </optgroup>
+                <optgroup label="── Oppervlakte-gebaseerd ──">
+                  <option value="kg/m²" title="Precisietoepassing op zeerniveau voor vaste stoffen">kg/m²</option>
+                  <option value="L/m²" title="Precisietoepassing op zeerniveau voor vloeistoffen">L/m²</option>
+                </optgroup>
+                <optgroup label="── Aantallen per hectare ──">
+                  <option value="zaden/ha" title="Voor zaai-zaad variabele dosering">zaden/ha</option>
+                  <option value="stuks/ha" title="Voor planten, pootgoed & bollen">stuks/ha</option>
+                  <option value="doses/ha" title="Voor biologische middelen & entingen">doses/ha</option>
+                </optgroup>
+                <optgroup label="── Algemeen ──">
+                  <option value="eenheden/ha" title="Zelf te definiëren eenheid">eenheden/ha</option>
+                </optgroup>
               </select>
+              <span class="unit-hint" id="unit-hint">ⓘ kg/ha — vaste meststoffen</span>
             </div>
 
             <div class="form-row">
@@ -182,27 +306,39 @@
               <p class="hint" id="auto-angle-hint" style="display:none"></p>
             </div>
 
-            <div id="ndvi-histogram-wrap" style="display:none;margin-bottom:12px">
-              <div style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px" data-i18n="labelNdviDist">NDVI verdeling</div>
-              <canvas id="ndvi-histogram" height="60" style="width:100%;display:block;border-radius:4px;background:#0d1117"></canvas>
-            </div>
-            <div style="display:flex;align-items:center;justify-content:space-between">
-              <h3 class="section-title" style="margin:0" data-i18n="labelClasses">Klassen</h3>
-              <button class="btn-classify-hint" id="auto-classify-btn" data-i18n="btnAutoClassify">auto-classificeer</button>
-            </div>
-            <div id="classes-container"></div>
-            <button class="btn btn-small btn-outline" id="add-class-btn" data-i18n="btnAddClass">+ Klasse toevoegen</button>
+            <div class="advanced-toggle-wrap">
+              <button class="advanced-toggle-btn" id="advanced-taskmap-toggle" type="button">
+                <svg class="chevron-sm" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+                <span data-i18n="advancedShow">Geavanceerde opties</span>
+              </button>
+              <div class="advanced-content" id="advanced-taskmap-content">
 
-            <button class="btn btn-primary" id="generate-btn" style="margin-top:16px" data-i18n="btnGenerate">Genereer Taakkaart</button>
+                <div class="form-row">
+                  <label for="ahn-select" data-i18n="lcAHN">AHN4 Hoogte</label>
+                  <select id="ahn-select">
+                    <option value="off" data-i18n="lcAhnOff">Uit</option>
+                    <option value="dtm" data-i18n="lcAhnDtm">DTM (maaiveld)</option>
+                    <option value="dsm" data-i18n="lcAhnDsm">DSM (oppervlak)</option>
+                  </select>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- Navigatie -->
+            <div class="step-nav" style="margin-top:16px">
+              <button class="btn btn-back btn-prev" data-prev="4" data-i18n="btnBack">Vorige</button>
+              <button class="btn btn-primary" id="generate-btn" style="flex:2" data-i18n="btnGenerate">Genereer Taakkaart</button>
+            </div>
           </div>
         </section>
 
-        <!-- STEP 5: Exporteren -->
-        <section class="step disabled" data-step="5" id="step-5">
-          <div class="step-header" data-toggle="5">
-            <div class="step-indicator"><span>5</span></div>
-            <h2 data-i18n="step5">Exporteren</h2>
-            <svg class="chevron" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+        <!-- STEP 6: Exporteren -->
+        <section class="step disabled" data-step="6" id="step-6">
+          <div class="step-header" data-toggle="6">
+            <div class="step-indicator"><span>6</span></div>
+            <h2 data-i18n="step6">Exporteren</h2>
+            <span class="step-status-badge" id="step6-badge" data-i18n="step6label">Export</span>
           </div>
           <div class="step-body">
             <div id="export-stats"></div>
@@ -225,6 +361,10 @@
                 CSV — Excel, FMIS, Agromanager
               </button>
             </div>
+            <!-- Navigatie -->
+            <div class="step-nav">
+              <button class="btn btn-back btn-prev" data-prev="5" data-i18n="btnBack">Vorige</button>
+            </div>
           </div>
         </section>
       </div>
@@ -237,15 +377,11 @@
       <div id="loading-overlay" class="hidden">
         <div class="loading-spinner"></div>
         <p id="loading-text" data-i18n="loading">Laden...</p>
+        <p id="loading-detail" class="hidden"></p>
       </div>
       <!-- Status toast -->
       <div id="toast" class="toast hidden"></div>
-      <!-- NDVI legend — always visible on desktop, hidden on mobile -->
-      <div id="desktop-legend" class="desktop-legend hidden">
-        <div class="desktop-legend-title" id="desktop-legend-title">NDVI</div>
-        <div class="legend-gradient"></div>
-        <div class="legend-labels" id="legend-labels"><span data-i18n="legendLow">laag</span><span></span><span data-i18n="legendHigh">hoog</span></div>
-      </div>
+      <!-- NDVI legend is now shown inside the ULC panel (both desktop and mobile) -->
     </main>
   </div>
 
@@ -261,8 +397,8 @@
   <script src="static/vendor/turf.min.js"></script>
   <script src="static/vendor/geotiff.js"></script>
   <!-- i18n (must load before app.js) -->
-  <script src="static/i18n.js?v=1"></script>
+  <script src="static/i18n.js?v=3"></script>
   <!-- App -->
-  <script type="module" src="static/app.js?v=25"></script>
+  <script type="module" src="static/app.js?v=28"></script>
 </body>
 </html>
