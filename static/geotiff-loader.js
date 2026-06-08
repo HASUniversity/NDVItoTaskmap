@@ -11,12 +11,13 @@
      - Compute button wiring
    =================================================== */
 
-import { state } from './state.js';
-import { ensureEPSG, showLoading, hideLoading, toast, setLoadingDetail } from './utils.js';
-import { escapeHtml } from './utils.js';
-import { displayNDVI, zoomToGeoTIFF, autoClassifyFromData } from './ndvi.js';
-import { startBRPLoading } from './brp.js';
-import { activateStep } from './steps.js';
+import { state, VEGETATION_INDICES } from './state.js?v=1';
+import { ensureEPSG, showLoading, hideLoading, toast, setLoadingDetail } from './utils.js?v=1';
+import { escapeHtml } from './utils.js?v=1';
+import { displayNDVI, displayRGB, zoomToGeoTIFF, autoClassifyFromData, clipNDVIToParcel } from './ndvi.js?v=1';
+import { showLegendInPanel } from './map.js?v=1';
+import { startBRPLoading } from './brp.js?v=1';
+import { activateStep } from './steps.js?v=1';
 
 const { t, tf } = window;
 
@@ -28,9 +29,14 @@ const fileDrop        = document.querySelector('#file-drop');
 const fileInfo        = document.querySelector('#file-info');
 const redBandSel      = document.querySelector('#red-band');
 const greenBandSel    = document.querySelector('#green-band');
+const blueBandSel     = document.querySelector('#blue-band');
 const nirBandSel      = document.querySelector('#nir-band');
 const rededgeBandSel  = document.querySelector('#rededge-band');
 export const viSelect = document.querySelector('#vi-select');
+const viInfo         = document.querySelector('#vi-info');
+const viFormula      = document.querySelector('#vi-formula');
+const viDesc         = document.querySelector('#vi-desc');
+const viDetails      = document.querySelector('#vi-details');
 const computeBtn      = document.querySelector('#compute-ndvi-btn');
 const stretchCheck    = document.querySelector('#stretch-ndvi');
 const resolutionSlider = document.querySelector('#resolution-slider');
@@ -79,6 +85,94 @@ if (resolutionSlider) {
   resolutionSlider.addEventListener('change', function () {
     clearTimeout(resolutionReloadTimer);
     reloadResolutionFromSlider();
+  });
+}
+
+// ==========================================
+// VI SELECT — populate from VEGETATION_INDICES
+// ==========================================
+
+/**
+ * Returns true if all bands required by the given VI definition are
+ * available in the loaded TIF (index >= 0 in state).
+ * If no TIF is loaded yet, all indices are shown.
+ */
+function isVIAvailable(vi) {
+  if (!state.georaster || state.bandMetas.length === 0) return true;
+  if (vi.needsBlue    && (state.bandBlue === null || state.bandBlue < 0)) return false;
+  if (vi.needsRed     && (state.bandRed === null || state.bandRed < 0)) return false;
+  if (vi.needsGreen   && (state.bandGreen === null || state.bandGreen < 0)) return false;
+  if (vi.needsNIR     && (state.bandNIR === null || state.bandNIR < 0)) return false;
+  if (vi.needsRedEdge && (state.bandRedEdge === null || state.bandRedEdge < 0)) return false;
+  return true;
+}
+
+/**
+ * Populates the VI <select> with only the indices whose required bands
+ * are present in the loaded TIF.  Falls back to NDVI if the previously
+ * selected index is no longer available.
+ */
+export function populateVISelect() {
+  if (!viSelect) return;
+  viSelect.innerHTML = '';
+  const available = VEGETATION_INDICES.filter(isVIAvailable);
+  const nirIndices = available.filter(v => v.type === 'nir');
+  const rgbIndices = available.filter(v => v.type === 'rgb');
+  if (nirIndices.length) {
+    const g1 = document.createElement('optgroup');
+    g1.label = '── NIR / Multispectraal ──';
+    nirIndices.forEach(vi => {
+      g1.appendChild(new Option(vi.label + ' — ' + vi.formula, vi.id));
+    });
+    viSelect.appendChild(g1);
+  }
+  if (rgbIndices.length) {
+    const g2 = document.createElement('optgroup');
+    g2.label = '── RGB (zichtbaar licht) ──';
+    rgbIndices.forEach(vi => {
+      g2.appendChild(new Option(vi.label + ' — ' + vi.formula, vi.id));
+    });
+    viSelect.appendChild(g2);
+  }
+  // Fallback: als de eerder geselecteerde VI niet meer beschikbaar is, kies NDVI
+  const current = state.selectedVI || 'NDVI';
+  if (available.some(v => v.id === current)) {
+    viSelect.value = current;
+  } else {
+    viSelect.value = 'NDVI';
+    state.selectedVI = 'NDVI';
+  }
+  updateVIInfo();
+  updateBandSelectorVisibility();
+}
+
+/** Updates the formula / info panel below the VI select. */
+export function updateVIInfo() {
+  if (!viInfo || !viFormula || !viDesc || !viDetails) return;
+  const id = viSelect ? viSelect.value : 'NDVI';
+  const vi = VEGETATION_INDICES.find(v => v.id === id);
+  if (!vi) { viInfo.style.display = 'none'; return; }
+  viFormula.textContent = vi.formula;
+  viDesc.textContent = vi.desc;
+  const typeLabel = vi.type === 'nir' ? 'NIR / Multispectraal' : 'RGB (zichtbaar licht)';
+  viDetails.innerHTML =
+    '<span>📊 ' + vi.purpose + '</span>' +
+    '<span>📏 ' + vi.range + '</span>' +
+    '<span>📁 ' + typeLabel + '</span>';
+  viInfo.style.display = '';
+}
+
+// Populate once on load
+populateVISelect();
+updateVIInfo();
+
+// Update info on VI change
+if (viSelect) {
+  viSelect.addEventListener('change', function () {
+    state.selectedVI = viSelect.value;
+    updateVIInfo();
+    updateBandSelectorVisibility();
+    showLegendInPanel();
   });
 }
 
@@ -289,6 +383,7 @@ async function handleFileUpload(file) {
     state.tiffImage = image;
     state.geotiffEPSG = epsg;
     state.sourceFileName = file.name;
+    state.numAlphaBands = nAlpha;
 
     const rasterInfo = await rebuildGeoRasterAtResolution(getRequestedResolution());
     const { width: tw, height: th } = rasterInfo;
@@ -307,7 +402,7 @@ async function handleFileUpload(file) {
       displayNDVI();
       autoClassifyFromData();
       zoomToGeoTIFF();
-      activateStep(3);
+      activateStep(2);
       startBRPLoading();
     } else if (isRGBProxy) {
       state.isPreCalc = false;
@@ -317,23 +412,41 @@ async function handleFileUpload(file) {
       document.querySelector('#info-mode').textContent = t('modeRGBMap') + ovNote2;
       document.querySelector('#band-info-row').classList.add('hidden');
       populateBandSelectors(nDataBands);
+      populateVISelect();
       document.querySelector('#band-desc').textContent = t('bandDescRGB');
       hideLoading();
       toast(t('toastRGBDetected'));
       displayNDVI();
       autoClassifyFromData();
       zoomToGeoTIFF();
-      activateStep(3);
+      activateStep(2);
       startBRPLoading();
     } else {
       state.isPreCalc = false;
-      state.bandRed     = pickBand(620, 700, /\bred\b(?!.?edge)/i, [nDataBands >= 5 ? 3 : (nDataBands >= 4 ? 2 : 0)]);
-      state.bandGreen   = pickBand(520, 580, /\bgreen\b/i,          [nDataBands >= 5 ? 1 : (nDataBands >= 3 ? 1 : 0)]);
-      state.bandNIR     = pickBand(780, 960, /\bnir\b|near.?ir|near.?infra/i, [nDataBands >= 5 ? 2 : (nDataBands >= 4 ? 3 : nDataBands - 1)]);
-      state.bandRedEdge = pickBand(700, 780, /\bred.?edge\b|\bre\b/i, [nDataBands >= 5 ? 4 : -1]);
+      // WebODM sorteert banden op golflengte (klein → groot), dus de meest
+      // voorkomende volgordes zijn:
+      //   5-band: B(450), G(560), R(650), RE(730), NIR(840) → R=2, G=1, B=0, NIR=4, RE=3
+      //   4-band (M3M): G(560), R(650), RE(730), NIR(840)  → R=1, G=0, B=-1, NIR=3, RE=2
+      //   Anders: laatste band / n-1 als NIR-fallback (vaak hoogste golflengte).
+      state.bandRed     = pickBand(620, 700, /\bred\b(?!.?edge)/i, [nDataBands >= 5 ? 2 : (nDataBands === 4 ? 1 : 0)]);
+      state.bandGreen   = pickBand(520, 580, /\bgreen\b/i,          [nDataBands >= 5 ? 1 : (nDataBands === 4 ? 0 : 1)]);
+      state.bandBlue    = pickBand(440, 510, /\bblue\b|coastal/i,   [-1]);
+      state.bandNIR     = pickBand(780, 960, /\bnir\b|near.?ir|near.?infra/i, [nDataBands >= 5 ? 4 : (nDataBands >= 4 ? 3 : nDataBands - 1)]);
+      state.bandRedEdge = pickBand(700, 780, /\bred.?edge\b|\bre\b/i, [nDataBands >= 5 ? 3 : (nDataBands === 4 ? 2 : -1)]);
 
-      const hasWlOrName = bandMetas.some(m => m.wavelength > 0 || m.name);
-      if (!hasWlOrName && nDataBands >= 2) {
+      // Check of pickBand via metadata (golflengte/naam) heeft gewerkt of fallback gebruikte.
+      // Alleen als minimaal Red EN NIR een metadata-match hebben, gaan we ervan uit dat
+      // de toewijzing klopt. Anders laten we de auto-heuristic de boel corrigeren.
+      function _matchedByMeta(wlLo, wlHi, nameRe) {
+        return bandMetas.slice(0, nDataBands).some(m =>
+          (m.wavelength > 0 && m.wavelength >= wlLo && m.wavelength <= wlHi) ||
+          (m.name && nameRe.test(m.name))
+        );
+      }
+      const redMatched   = _matchedByMeta(620, 700, /\bred\b(?!.?edge)/i);
+      const nirMatched   = _matchedByMeta(780, 960, /\bnir\b|near.?ir|near.?infra/i);
+      const needsHeuristic = !redMatched || !nirMatched;
+      if (needsHeuristic && nDataBands >= 2) {
         const gr = state.georaster;
         const values = gr.values;
         const bandMeans = [];
@@ -347,17 +460,19 @@ async function handleFileUpload(file) {
             }
           bandMeans.push(cnt > 0 ? s / cnt : 0);
         }
+        // NIR = hoogste gemiddelde (vegetatie reflecteert NIR het sterkst)
         const sorted = bandMeans.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
         state.bandNIR = sorted[0].i;
-        const nirMean = sorted[0].v;
-        let best = -1, bestDiff = Infinity;
+        // Red = laagste gemiddelde (niet-NIR) — Rood is donkerste visuele band
+        let redIdx = -1;
+        let redMin = Infinity;
         for (let i = 0; i < nDataBands; i++) {
           if (i === state.bandNIR) continue;
-          const diff = Math.abs(bandMeans[i] - nirMean * 0.65);
-          if (diff < bestDiff) { bestDiff = diff; best = i; }
+          if (bandMeans[i] > 0 && bandMeans[i] < redMin) { redMin = bandMeans[i]; redIdx = i; }
         }
-        state.bandRed = best >= 0 ? best : sorted[1].i;
+        state.bandRed = redIdx >= 0 ? redIdx : sorted[sorted.length - 1].i;
         console.log('[Auto heuristic] band means:', bandMeans.map((v, i) => 'B' + (i + 1) + ':' + v.toFixed(4)).join(' '));
+        console.log('[Auto heuristic] Red=B' + (state.bandRed + 1) + ' NIR=B' + (state.bandNIR + 1) + ' (redMatched=' + redMatched + ' nirMatched=' + nirMatched + ')');
       }
       if (state.bandRed === state.bandNIR)
         state.bandNIR = state.bandRed === nDataBands - 1 ? nDataBands - 2 : nDataBands - 1;
@@ -374,9 +489,12 @@ async function handleFileUpload(file) {
       if (tbl) {
         tbl.innerHTML = '<tr style="color:#aaa"><th>B</th><th>Naam</th><th>nm</th><th>Min</th><th>Max</th></tr>' +
           bandMetas.slice(0, nDataBands).map((m, i) => {
-            const isR = i === state.bandRed, isN = i === state.bandNIR;
-            const flag = isR ? ' 🔴R' : (isN ? ' 🟢N' : '');
-            return '<tr style="' + (isR || isN ? 'font-weight:bold' : '') + '">' +
+            const isR = i === state.bandRed, isG = i === state.bandGreen, isB = i === state.bandBlue, isN = i === state.bandNIR, isRE = i === state.bandRedEdge;
+            const flags = [];
+            if (isR) flags.push('🔴R'); if (isG) flags.push('🟢G'); if (isB) flags.push('🔵B'); if (isN) flags.push('🟣N'); if (isRE) flags.push('🟠RE');
+            const flag = flags.length ? ' ' + flags.join(' ') : '';
+            const isHighlight = isR || isN;
+            return '<tr style="' + (isHighlight ? 'font-weight:bold' : '') + '">' +
               '<td>B' + (i + 1) + flag + '</td>' +
               '<td>' + escapeHtml(m.name || '-') + '</td>' +
               '<td>' + escapeHtml(m.wavelength || '-') + '</td>' +
@@ -390,7 +508,12 @@ async function handleFileUpload(file) {
       const ovNote = tw < fullW ? tf('loadedAs', tw, th) : '';
       document.querySelector('#info-mode').textContent = tf('modeBands', nDataBands) + ovNote;
       populateBandSelectors(nDataBands);
+      populateVISelect();
       document.querySelector('#band-desc').textContent = t('bandDescMulti');
+      displayRGB();
+      zoomToGeoTIFF();
+      // BRP alvast starten zodat percelen zichtbaar zijn op stap 2
+      startBRPLoading();
       hideLoading();
       toast(t('toastGeoTIFFLoaded'));
       activateStep(2);
@@ -408,11 +531,16 @@ async function handleFileUpload(file) {
 export function populateBandSelectors(n) {
   redBandSel.innerHTML = '';
   greenBandSel.innerHTML = '';
+  blueBandSel.innerHTML = '';
   nirBandSel.innerHTML = '';
   rededgeBandSel.innerHTML = '';
   const metas = state.bandMetas || [];
-  const odmNames5 = ['Blue (B)', 'Green (G)', 'NIR', 'Red (R)', 'RedEdge (RE)'];
-  const odmNames4 = ['Blue (B)', 'Green (G)', 'Red (R)', 'NIR'];
+  // WebODM sorteert banden op golflengte (klein → groot)
+  // 5-band: B(475), G(560), R(668), RE(717), NIR(840)
+  // 4-band (DJI P4M/M3M): G(560), R(650), RE(730), NIR(840) — géén blauw
+  // 3-band RGB: R, G, B (niet wavelength-sorted, gewoon RGB)
+  const odmNames5 = ['Blue (B)', 'Green (G)', 'Red (R)', 'RedEdge (RE)', 'NIR'];
+  const odmNames4 = ['Green (G)', 'Red (R)', 'RedEdge (RE)', 'NIR'];
   const odmNames3 = ['Red (R)', 'Green (G)', 'Blue (B)'];
   const rgbNames3 = ['Red (R)', 'NIR (G-kanaal)', 'Blue (B)'];
   const rgbNames4 = ['Red (R)', 'NIR (G-kanaal)', 'Blue (B)', 'Alpha'];
@@ -435,11 +563,13 @@ export function populateBandSelectors(n) {
     }
     redBandSel.add(new Option(lbl, i));
     greenBandSel.add(new Option(lbl, i));
+    blueBandSel.add(new Option(lbl, i));
     nirBandSel.add(new Option(lbl, i));
     rededgeBandSel.add(new Option(lbl, i));
   }
   if (state.bandRed !== null) redBandSel.value = state.bandRed;
   if (state.bandGreen !== null) greenBandSel.value = state.bandGreen;
+  if (state.bandBlue !== null) blueBandSel.value = state.bandBlue;
   if (state.bandNIR !== null) nirBandSel.value = state.bandNIR;
   if (state.bandRedEdge !== null && state.bandRedEdge >= 0) rededgeBandSel.value = state.bandRedEdge;
   if (viSelect) viSelect.value = state.selectedVI || 'NDVI';
@@ -448,33 +578,59 @@ export function populateBandSelectors(n) {
 
 export function updateBandSelectorVisibility() {
   const vi = viSelect ? viSelect.value : 'NDVI';
-  redBandSel.closest('.form-row').style.display     = (vi === 'NDVI' || vi === 'SAVI' || vi === 'OSAVI') ? '' : 'none';
-  greenBandSel.closest('.form-row').style.display   = (vi === 'GNDVI') ? '' : 'none';
-  rededgeBandSel.closest('.form-row').style.display = (vi === 'NDRE') ? '' : 'none';
+  const def = VEGETATION_INDICES.find(v => v.id === vi);
+  const needR  = def ? def.needsRed : true;
+  const needG  = def ? def.needsGreen : false;
+  const needB  = def ? def.needsBlue : false;
+  const needN  = def ? def.needsNIR : true;
+  const needRE = def ? def.needsRedEdge : false;
+  redBandSel.closest('.form-row').style.display     = needR  ? '' : 'none';
+  greenBandSel.closest('.form-row').style.display   = needG  ? '' : 'none';
+  blueBandSel.closest('.form-row').style.display    = needB  ? '' : 'none';
+  nirBandSel.closest('.form-row').style.display     = needN  ? '' : 'none';
+  rededgeBandSel.closest('.form-row').style.display = needRE ? '' : 'none';
 }
 if (viSelect) viSelect.addEventListener('change', updateBandSelectorVisibility);
 
 computeBtn.addEventListener('click', function () {
   state.bandRed      = parseInt(redBandSel.value);
   state.bandGreen    = parseInt(greenBandSel.value);
+  state.bandBlue     = blueBandSel && blueBandSel.value ? parseInt(blueBandSel.value) : -1;
   state.bandNIR      = parseInt(nirBandSel.value);
-  state.bandRedEdge  = parseInt(rededgeBandSel.value);
+  state.bandRedEdge  = rededgeBandSel && rededgeBandSel.value ? parseInt(rededgeBandSel.value) : -1;
   state.selectedVI   = viSelect ? viSelect.value : 'NDVI';
   state.isPreCalc    = false;
   state.isRGBProxy   = false;
   const vi = state.selectedVI;
-  const bandA = state.bandNIR;
-  const bandB = vi === 'GNDVI' ? state.bandGreen : vi === 'NDRE' ? state.bandRedEdge : state.bandRed;
-  if (bandA === bandB) { toast(t('toastSameBands'), true); return; }
-  showLoading(tf('loadingVI', vi));
+  const def = VEGETATION_INDICES.find(v => v.id === vi);
+  // Check for duplicate bands
+  const usedBands = [];
+  if (def && def.needsRed) usedBands.push(state.bandRed);
+  if (def && def.needsGreen) usedBands.push(state.bandGreen);
+  if (def && def.needsBlue) usedBands.push(state.bandBlue);
+  if (def && def.needsNIR) usedBands.push(state.bandNIR);
+  if (def && def.needsRedEdge) usedBands.push(state.bandRedEdge);
+  const unique = new Set(usedBands);
+  if (unique.size !== usedBands.length) { toast(t('toastSameBands'), true); return; }
+  // Check of alle benodigde banden een geldig index hebben (>=0)
+  const missingBand = usedBands.some(idx => idx < 0);
+  if (missingBand) { toast(tf('toastMissingBand', vi), true); return; }  // Her-populeer de VI lijst (want bandtoewijzing kan veranderd zijn)
+  populateVISelect();  showLoading(tf('loadingVI', vi));
   setLoadingDetail(state.sourceFileName + ' \u2014 ' + vi + ' @ ' + getRequestedResolution() + ' px');
   setTimeout(function () {
     displayNDVI();
     autoClassifyFromData();
     zoomToGeoTIFF();
+    // Als er al percelen geselecteerd zijn, knip de VI direct naar de selectie
+    if (state.selectedParcels && state.selectedParcels.length > 0) {
+      clipNDVIToParcel(state.selectedParcels);
+      if (state.classificationMethod !== 'manual') {
+        autoClassifyFromData();
+      }
+    }
     hideLoading();
     toast(tf('toastVIComputed', state.selectedVI));
-    activateStep(3);
+    activateStep(4);
     startBRPLoading();
   }, 50);
 });

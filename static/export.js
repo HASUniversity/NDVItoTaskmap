@@ -14,8 +14,8 @@
    the code self-contained and dependency-free.
    =================================================== */
 
-import { state } from './state.js';
-import { toast, escapeHtml, escapeXml, showLoading, hideLoading } from './utils.js';
+import { state } from './state.js?v=1';
+import { toast, escapeHtml, escapeXml, showLoading, hideLoading } from './utils.js?v=1';
 
 const { t, tf } = window;
 
@@ -31,13 +31,13 @@ const exportNameInput = document.querySelector('#export-name');
 // ==========================================
 exportGeoBtn.addEventListener('click', function () {
   if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
-  const name = exportNameInput.value || 'taakkaart';
+  const name = exportNameInput.value || _defaultName('taskmap');
   const exportFC = {
     type: 'FeatureCollection',
     features: state.taskMapFC.features.map(f => ({
       type: 'Feature',
       geometry: f.geometry,
-      properties: { ndvi: f.properties.ndvi, klasse: f.properties.klasse, dosering: f.properties.dosering, eenheid: f.properties.eenheid }
+      properties: { ndvi: f.properties.ndvi, 'class': f.properties['class'], dose: f.properties.dose, unit: f.properties.unit }
     }))
   };
   const blob = new Blob([JSON.stringify(exportFC, null, 2)], { type: 'application/geo+json' });
@@ -51,7 +51,7 @@ exportGeoBtn.addEventListener('click', function () {
 exportShpBtn.addEventListener('click', function () {
   if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
   try {
-    const name = exportNameInput.value || 'taakkaart';
+    const name = exportNameInput.value || _defaultName('taskmap');
     const blob = buildShapefileZip(state.taskMapFC, name);
     _triggerDownload(blob, name + '.zip');
     toast(t('toastShpDownload'));
@@ -68,7 +68,7 @@ const exportCsvBtn = document.querySelector('#export-csv-btn');
 if (exportCsvBtn) {
   exportCsvBtn.addEventListener('click', function () {
     if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
-    const name = exportNameInput.value || 'taakkaart';
+    const name = exportNameInput.value || _defaultName('taskmap');
     const csv = buildCSV(state.taskMapFC);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     _triggerDownload(blob, name + '.csv');
@@ -86,7 +86,7 @@ if (exportIsoxmlBtn) {
     showLoading(t('loadingISOXML'));
     setTimeout(function () {
       try {
-        const name = exportNameInput.value || 'taakkaart';
+        const name = exportNameInput.value || _defaultName('taskdata');
         const blob = buildISOXMLZip(state.taskMapFC, name, state.unit);
         hideLoading();
         if (!blob) return;
@@ -102,6 +102,51 @@ if (exportIsoxmlBtn) {
 }
 
 // ==========================================
+// PARCEL EXPORT — Shapefile & GeoPackage
+// ==========================================
+/** Export selected parcels as Shapefile (.zip) */
+const exportParcelsShpBtn = document.querySelector('#export-parcels-shp-btn');
+if (exportParcelsShpBtn) {
+  exportParcelsShpBtn.addEventListener('click', function () {
+    if (!state.selectedParcels || state.selectedParcels.length === 0) {
+      toast(t('toastSelectParcels'), true); return;
+    }
+    try {
+      const fc = { type: 'FeatureCollection', features: state.selectedParcels };
+      const name = exportNameInput.value || _defaultName('parcels');
+      const blob = buildParcelShapefileZip(fc, name);
+      _triggerDownload(blob, name + '.zip');
+      toast(t('toastParcelShpDownload'));
+    } catch (err) {
+      console.error(err);
+      toast(tf('toastExportError', err.message), true);
+    }
+  });
+}
+
+/** Export selected parcels as GeoPackage (.gpkg) */
+const exportParcelsGpkgBtn = document.querySelector('#export-parcels-gpkg-btn');
+if (exportParcelsGpkgBtn) {
+  exportParcelsGpkgBtn.addEventListener('click', function () {
+    if (!state.selectedParcels || state.selectedParcels.length === 0) {
+      toast(t('toastSelectParcels'), true); return;
+    }
+    try {
+      const fc = { type: 'FeatureCollection', features: state.selectedParcels };
+      const name = exportNameInput.value || _defaultName('parcels');
+      const blob = buildParcelGeoPackage(fc);
+      if (blob) {
+        _triggerDownload(blob, name + '.gpkg');
+        toast(t('toastParcelGpkgDownload'));
+      }
+    } catch (err) {
+      console.error(err);
+      toast(tf('toastExportError', err.message), true);
+    }
+  });
+}
+
+// ==========================================
 // HELPERS
 // ==========================================
 function _triggerDownload(blob, filename) {
@@ -113,6 +158,54 @@ function _triggerDownload(blob, filename) {
 }
 
 /**
+ * Generates a dynamic default filename based on the source raster name,
+ * today's date and the export type suffix.
+ * Example: "odm_orthophoto_20250602_taskmap"
+ * @param {string} suffix - e.g. 'taskmap', 'taskdata', 'parcels'
+ * @returns {string}
+ */
+function _defaultName(suffix) {
+  const src = state.sourceFileName || 'ndvi';
+  const base = src.replace(/\.[^.]+$/, '');
+  const d = new Date();
+  const ds = d.getFullYear() +
+    String(d.getMonth() + 1).padStart(2, '0') +
+    String(d.getDate()).padStart(2, '0');
+  return base + '_' + ds + '_' + suffix;
+}
+
+/** Update the export-name input placeholder when the source file changes */
+function _updateExportNameInput() {
+  if (exportNameInput) {
+    const name = _defaultName('taskmap');
+    exportNameInput.placeholder = name;
+    // Only overwrite if user hasn't manually edited it
+    if (!exportNameInput.dataset.userEdited) {
+      exportNameInput.value = name;
+    }
+  }
+}
+// Watch for source file changes and refresh the export name
+let _srcWatcher = setInterval(function () {
+  if (state.sourceFileName) {
+    _updateExportNameInput();
+    clearInterval(_srcWatcher);
+  }
+}, 200);
+// Also run immediately
+_updateExportNameInput();
+// Track user edits — don't overwrite once manually changed
+exportNameInput.addEventListener('input', function () {
+  exportNameInput.dataset.userEdited = 'true';
+});
+exportNameInput.addEventListener('blur', function () {
+  if (!this.value.trim()) {
+    delete this.dataset.userEdited;
+    _updateExportNameInput();
+  }
+});
+
+/**
  * Builds a UTF-8 BOM-prefixed CSV string from the task-map FeatureCollection.
  * Each row represents one grid cell with its NDVI, class, dosage, unit and
  * area in m².
@@ -120,15 +213,15 @@ function _triggerDownload(blob, filename) {
  * @returns {string} CSV text.
  */
 function buildCSV(geojson) {
-  const rows = ['\uFEFFcel_id,ndvi,klasse,dosering,eenheid,oppervlakte_m2'];
+  const rows = ['\uFEFFcell_id,ndvi,class,dose,unit,area_m2'];
   geojson.features.forEach(function (f, i) {
     const p = f.properties;
     const area = Math.round(turf.area(f));
     rows.push([
       i + 1, p.ndvi,
-      '"' + String(p.klasse || '').replace(/"/g, '""') + '"',
-      p.dosering,
-      '"' + String(p.eenheid || '').replace(/"/g, '""') + '"',
+      '"' + String(p['class'] || '').replace(/"/g, '""') + '"',
+      p.dose,
+      '"' + String(p.unit || '').replace(/"/g, '""') + '"',
       area
     ].join(','));
   });
@@ -168,10 +261,10 @@ function buildISOXMLZip(geojson, name, unit) {
   const rateMap = {}, tznList = [];
   let code = 1;
   geojson.features.forEach(function (f) {
-    const key = String(f.properties.dosering) + '|' + f.properties.klasse;
+    const key = String(f.properties.dose) + '|' + f.properties['class'];
     if (!rateMap[key]) {
       rateMap[key] = code++;
-      tznList.push({ code: rateMap[key], rate: f.properties.dosering, label: f.properties.klasse });
+      tznList.push({ code: rateMap[key], rate: f.properties.dose, label: f.properties['class'] });
     }
   });
   const allBbox = turf.bbox(geojson);
@@ -187,7 +280,7 @@ function buildISOXMLZip(geojson, name, unit) {
 
   const gridBin = new Uint8Array(numRows * numCols);
   geojson.features.forEach(function (f) {
-    const key = String(f.properties.dosering) + '|' + f.properties.klasse;
+    const key = String(f.properties.dose) + '|' + f.properties['class'];
     const tznCode = rateMap[key];
     const fb = turf.bbox(f);
     const c0 = Math.max(0, Math.floor((fb[0] - lonMin) / cellLonDeg));
@@ -341,13 +434,41 @@ function _buildZipBlob(files) {
  * @param {string} name    - Base filename (without extension).
  * @returns {Blob} ZIP Blob containing the four shapefile components.
  */
+/**
+ * Ensures polygon ring orientation matches the Shapefile specification:
+ * exterior rings clockwise (CW), interior rings (holes) counter-clockwise (CCW).
+ * GeoJSON (RFC 7946) uses the opposite — exterior CCW, holes CW — so rings
+ * are reversed where needed.
+ * @param {number[][][]} rings - Array of rings (each ring is an array of [lon,lat]).
+ * @returns {number[][][]} Rings with corrected orientation.
+ */
+function _fixRingOrientation(rings) {
+  return rings.map(function (ring, idx) {
+    // Signed area (2×) via trapezoid formula: positive → CW in geographic coords
+    let s = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      s += (ring[j][0] - ring[i][0]) * (ring[i][1] + ring[j][1]);
+    }
+    const isCW = s > 0;
+    if (idx === 0) {
+      // exterior ring — Shapefile expects CW
+      return isCW ? ring : ring.slice().reverse();
+    } else {
+      // hole — Shapefile expects CCW
+      return isCW ? ring.slice().reverse() : ring;
+    }
+  });
+}
+
 function buildShapefileZip(geojson, name) {
   const feats = geojson.features.filter(f => f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon'));
 
   const recs = feats.map(function (f) {
-    const rings = f.geometry.type === 'Polygon'
-      ? f.geometry.coordinates
-      : f.geometry.coordinates.reduce((a, p) => a.concat(p), []);
+    const rings = _fixRingOrientation(
+      f.geometry.type === 'Polygon'
+        ? f.geometry.coordinates
+        : f.geometry.coordinates.reduce((a, p) => a.concat(p), [])
+    );
     const nPts = rings.reduce((s, r) => s + r.length, 0);
     const ab = new ArrayBuffer(44 + 4 * rings.length + 16 * nPts);
     const v = new DataView(ab);
@@ -402,10 +523,10 @@ function buildShapefileZip(geojson, name) {
   const shxFile = _concat([makeHdr((100 + recs.length * 8) / 2), new Uint8Array(shxBody)]);
 
   const flds = [
-    { n: 'NDVI',     t: 'N', l: 10, d: 3 },
-    { n: 'KLASSE',   t: 'C', l: 30, d: 0 },
-    { n: 'DOSERING', t: 'N', l: 10, d: 0 },
-    { n: 'EENHEID',  t: 'C', l: 20, d: 0 },
+    { n: 'NDVI',   t: 'N', l: 12, d: 4 },
+    { n: 'CLASS',  t: 'C', l: 30, d: 0 },
+    { n: 'DOSE',   t: 'N', l: 12, d: 2 },
+    { n: 'UNIT',   t: 'C', l: 10, d: 0 },
   ];
   const recSz = 1 + flds.reduce((s, f) => s + f.l, 0);
   const hdrSz = 33 + flds.length * 32;
@@ -441,20 +562,23 @@ function buildShapefileZip(geojson, name) {
   });
   dbfU[hdrSz + feats.length * recSz] = 0x1A;
 
-  const prj = new TextEncoder().encode('GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]]');
+  const prj = new TextEncoder().encode('GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]]');
+  const cpg = new TextEncoder().encode('UTF-8');
 
   return _buildZipBlob([
     { name: name + '.shp', data: shpFile },
     { name: name + '.shx', data: shxFile },
     { name: name + '.dbf', data: new Uint8Array(dbfBuf) },
     { name: name + '.prj', data: prj },
+    { name: name + '.cpg', data: cpg },
   ]);
 }
 
 // ==========================================
 // NDVI GEOTIFF EXPORT (clipped to selected parcels)
+// (nu in stap 6 — Exporteren)
 // ==========================================
-const exportNdviTifBtn = document.querySelector('#export-ndvi-tif-btn');
+const exportNdviTifBtn = document.querySelector('#export-ndvi-tif-step6-btn');
 if (exportNdviTifBtn) {
   exportNdviTifBtn.addEventListener('click', function () {
     if (!state.ndviGrid || !state.georaster) { toast(t('toastNoNDVI'), true); return; }
@@ -699,4 +823,703 @@ function _buildSingleBandFloat32GeoTIFF(pixels, width, height, originX, originY,
   }
 
   return new Blob([buf], { type: 'image/tiff' });
+}
+
+// ==========================================
+// PARCEL SHAPEFILE EXPORT (wrapper with parcel attributes)
+// ==========================================
+/**
+ * Builds a shapefile ZIP from a parcel FeatureCollection with relevant
+ * BRP attributes (gewas, gewasgroep, oppervlakte) in the DBF table.
+ * Delegates geometry/shx/dbf/prj encoding to buildShapefileZip.
+ * @param {object} geojson - GeoJSON FeatureCollection of parcels.
+ * @param {string} name    - Base filename.
+ * @returns {Blob} ZIP blob with .shp/.shx/.dbf/.prj
+ */
+function buildParcelShapefileZip(geojson, name) {
+  const feats = geojson.features.filter(function (f) {
+    return f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon');
+  });
+
+  const recs = feats.map(function (f) {
+    const rings = _fixRingOrientation(
+      f.geometry.type === 'Polygon'
+        ? f.geometry.coordinates
+        : f.geometry.coordinates.reduce(function (a, p) { return a.concat(p); }, [])
+    );
+    const nPts = rings.reduce(function (s, r) { return s + r.length; }, 0);
+    const ab = new ArrayBuffer(44 + 4 * rings.length + 16 * nPts);
+    const v = new DataView(ab);
+    let o = 0;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    rings.forEach(function (r) {
+      r.forEach(function (p) {
+        if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0];
+        if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1];
+      });
+    });
+    v.setInt32(o, 5, true); o += 4;
+    v.setFloat64(o, x0, true); o += 8; v.setFloat64(o, y0, true); o += 8;
+    v.setFloat64(o, x1, true); o += 8; v.setFloat64(o, y1, true); o += 8;
+    v.setInt32(o, rings.length, true); o += 4;
+    v.setInt32(o, nPts, true); o += 4;
+    var pi = 0;
+    rings.forEach(function (r) { v.setInt32(o, pi, true); o += 4; pi += r.length; });
+    rings.forEach(function (r) {
+      r.forEach(function (p) { v.setFloat64(o, p[0], true); o += 8; v.setFloat64(o, p[1], true); o += 8; });
+    });
+    return { u8: new Uint8Array(ab), x0: x0, y0: y0, x1: x1, y1: y1 };
+  });
+
+  var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  recs.forEach(function (r) {
+    if (r.x0 < bx0) bx0 = r.x0; if (r.y0 < by0) by0 = r.y0;
+    if (r.x1 > bx1) bx1 = r.x1; if (r.y1 > by1) by1 = r.y1;
+  });
+  if (!isFinite(bx0)) { bx0 = 0; by0 = 0; bx1 = 0; by1 = 0; }
+
+  function makeHdr(words) {
+    var ab2 = new ArrayBuffer(100), v2 = new DataView(ab2);
+    v2.setInt32(0, 9994, false); v2.setInt32(24, words, false);
+    v2.setInt32(28, 1000, true); v2.setInt32(32, 5, true);
+    v2.setFloat64(36, bx0, true); v2.setFloat64(44, by0, true);
+    v2.setFloat64(52, bx1, true); v2.setFloat64(60, by1, true);
+    return new Uint8Array(ab2);
+  }
+
+  var shpBodyLen = recs.reduce(function (s, r) { return s + 8 + r.u8.length; }, 0);
+  var shpBody = new ArrayBuffer(shpBodyLen), shpV = new DataView(shpBody);
+  var shpPos = 0;
+  var shxBody = new ArrayBuffer(recs.length * 8), shxV = new DataView(shxBody);
+  recs.forEach(function (r, i) {
+    var offW = (100 + shpPos) / 2;
+    shxV.setInt32(i * 8, offW, false);
+    shxV.setInt32(i * 8 + 4, r.u8.length / 2, false);
+    shpV.setInt32(shpPos, i + 1, false);
+    shpV.setInt32(shpPos + 4, r.u8.length / 2, false);
+    shpPos += 8;
+    new Uint8Array(shpBody, shpPos).set(r.u8);
+    shpPos += r.u8.length;
+  });
+  var shpFile = _concat([makeHdr((100 + shpBodyLen) / 2), new Uint8Array(shpBody)]);
+  var shxFile = _concat([makeHdr((100 + recs.length * 8) / 2), new Uint8Array(shxBody)]);
+
+  // Parcel-specific DBF fields: crop name, crop group, area (ha), category
+  var flds = [
+    { n: 'CROP',     t: 'C', l: 60, d: 0 },
+    { n: 'CROP_GRP', t: 'C', l: 40, d: 0 },
+    { n: 'AREA_HA',  t: 'N', l: 12, d: 3 },
+    { n: 'CATEGORY', t: 'C', l: 20, d: 0 },
+  ];
+  var recSz = 1 + flds.reduce(function (s, f) { return s + f.l; }, 0);
+  var hdrSz = 33 + flds.length * 32;
+  var dbfBuf = new ArrayBuffer(hdrSz + feats.length * recSz + 1);
+  var dbfV = new DataView(dbfBuf), dbfU = new Uint8Array(dbfBuf);
+  var now = new Date();
+  dbfV.setUint8(0, 3);
+  dbfV.setUint8(1, now.getFullYear() - 1900);
+  dbfV.setUint8(2, now.getMonth() + 1);
+  dbfV.setUint8(3, now.getDate());
+  dbfV.setUint32(4, feats.length, true);
+  dbfV.setUint16(8, hdrSz, true);
+  dbfV.setUint16(10, recSz, true);
+  flds.forEach(function (f, fi) {
+    var base = 32 + fi * 32;
+    for (var j = 0; j < f.n.length; j++) dbfU[base + j] = f.n.charCodeAt(j);
+    dbfU[base + 11] = f.t.charCodeAt(0);
+    dbfU[base + 16] = f.l;
+    dbfU[base + 17] = f.d;
+  });
+  dbfU[32 + flds.length * 32] = 0x0D;
+  feats.forEach(function (feat, fi) {
+    var p = feat.properties || {};
+    var base2 = hdrSz + fi * recSz;
+    dbfU[base2] = 0x20;
+    var crop  = p.crop || p.CROP || p.GWS_GEWAS || '';
+    var group = p.crop_group || p.crop_grp || p.CROP_GRP || '';
+    var areaHa = 0;
+    try { areaHa = turf.area(feat) / 10000; } catch (e) {}
+    var cat  = p.category || p.CATEGORY || '';
+    var vals = [
+      String(crop).padEnd(60).substring(0, 60),
+      String(group).padEnd(40).substring(0, 40),
+      areaHa.toFixed(3).padStart(12).substring(0, 12),
+      String(cat).padEnd(20).substring(0, 20),
+    ];
+    var col = 1;
+    vals.forEach(function (val) {
+      for (var j = 0; j < val.length; j++) dbfU[base2 + col + j] = val.charCodeAt(j) || 0x20;
+      col += val.length;
+    });
+  });
+  dbfU[hdrSz + feats.length * recSz] = 0x1A;
+
+  var prj = new TextEncoder().encode('GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]]');
+  var cpg = new TextEncoder().encode('UTF-8');
+
+  return _buildZipBlob([
+    { name: name + '.shp', data: shpFile },
+    { name: name + '.shx', data: shxFile },
+    { name: name + '.dbf', data: new Uint8Array(dbfBuf) },
+    { name: name + '.prj', data: prj },
+    { name: name + '.cpg', data: cpg },
+  ]);
+}
+
+// ==========================================
+// GEOPACKAGE EXPORT (pure JS, minimal SQLite writer)
+// ==========================================
+/**
+ * Builds a valid OGC GeoPackage (.gpkg) from a parcel FeatureCollection.
+ *
+ * GeoPackage is a SQLite container with specific metadata tables.
+ * This implementation writes the SQLite database binary directly,
+ * requiring no external dependencies.
+ *
+ * @param {object} geojson - GeoJSON FeatureCollection (EPSG:4326 polygons).
+ * @returns {Blob|null} GeoPackage blob, or null on error.
+ */
+function buildParcelGeoPackage(geojson) {
+  var feats = geojson.features.filter(function (f) {
+    return f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon');
+  });
+  if (feats.length === 0) return null;
+
+  // ---------------------------------------------------------------
+  // 1. WKB geometry encoder (little-endian, Polygon/MultiPolygon)
+  // ---------------------------------------------------------------
+  function encodeWKB(geom) {
+    var LE = true;
+    if (geom.type === 'Polygon') {
+      var rings = geom.coordinates;
+      var totalPts = 0;
+      rings.forEach(function (r) { totalPts += r.length; });
+      var buf = new ArrayBuffer(9 + rings.length * 4 + totalPts * 16);
+      var v = new DataView(buf);
+      var o = 0;
+      v.setUint8(o, 1); o += 1;           // byte order LE
+      v.setUint32(o, 3, LE); o += 4;       // Polygon = 3
+      v.setUint32(o, rings.length, LE); o += 4;
+      rings.forEach(function (r) {
+        v.setUint32(o, r.length, LE); o += 4;
+        r.forEach(function (p) {
+          v.setFloat64(o, p[0], LE); o += 8;
+          v.setFloat64(o, p[1], LE); o += 8;
+        });
+      });
+      return new Uint8Array(buf);
+    }
+    // MultiPolygon
+    var polys = geom.coordinates;
+    var totalSize = 9; // byteOrder + type + numPolys
+    polys.forEach(function (poly) {
+      totalSize += 9; // byteOrder + type + numRings
+      poly.forEach(function (ring) {
+        totalSize += 4 + ring.length * 16;
+      });
+    });
+    var buf2 = new ArrayBuffer(totalSize);
+    var v2 = new DataView(buf2);
+    var o2 = 0;
+    v2.setUint8(o2, 1); o2 += 1;
+    v2.setUint32(o2, 6, LE); o2 += 4;      // MultiPolygon = 6
+    v2.setUint32(o2, polys.length, LE); o2 += 4;
+    polys.forEach(function (poly) {
+      v2.setUint8(o2, 1); o2 += 1;
+      v2.setUint32(o2, 3, LE); o2 += 4;    // Polygon = 3
+      v2.setUint32(o2, poly.length, LE); o2 += 4;
+      poly.forEach(function (ring) {
+        v2.setUint32(o2, ring.length, LE); o2 += 4;
+        ring.forEach(function (p) {
+          v2.setFloat64(o2, p[0], LE); o2 += 8;
+          v2.setFloat64(o2, p[1], LE); o2 += 8;
+        });
+      });
+    });
+    return new Uint8Array(buf2);
+  }
+
+  // ---------------------------------------------------------------
+  // 2. GeoPackage Geometry Binary (GPB) encoder
+  //    Header (8 bytes) + WKB geometry
+  // ---------------------------------------------------------------
+  function encodeGPB(geom) {
+    var wkb = encodeWKB(geom);
+    var LE = true;
+    var flags = 1; // bit 0 = 1 (LE byte order)
+    var buf = new ArrayBuffer(8 + wkb.length);
+    var v = new DataView(buf);
+    v.setUint8(0, 0x47);                // 'G'
+    v.setUint8(1, 0x50);                // 'P'
+    v.setUint8(2, 0x00);                // version 0
+    v.setUint8(3, flags);               // flags
+    v.setUint32(4, 4326, LE);           // SRS ID (WGS84)
+    new Uint8Array(buf, 8).set(wkb);
+    return new Uint8Array(buf);
+  }
+
+  // ---------------------------------------------------------------
+  // 3. SQLite varint encoder (returns [bytes, length])
+  // ---------------------------------------------------------------
+  function sqliteVarint(val) {
+    if (val < 0) val = 0;
+    var bytes = [];
+    // Encode in 7-bit groups, MSB first
+    var temp = val;
+    var n = 0;
+    while (temp > 0x7F) { n++; temp >>>= 7; }
+    n++; // at least 1 byte
+    for (var i = n - 1; i >= 0; i--) {
+      var shift = i * 7;
+      var b = (val >>> shift) & 0x7F;
+      if (i > 0) b |= 0x80;
+      bytes.push(b);
+    }
+    if (bytes.length === 0) bytes.push(0);
+    return bytes;
+  }
+
+  // ---------------------------------------------------------------
+  // 4. SQLite record builder
+  //    Returns { header: Uint8Array, data: Uint8Array }
+  // ---------------------------------------------------------------
+  function buildRecord(values) {
+    var types = [];
+    var dataParts = [];
+    var enc = new TextEncoder();
+
+    values.forEach(function (v) {
+      if (v === null || v === undefined) {
+        types.push(0); // NULL
+        dataParts.push(new Uint8Array(0));
+      } else if (typeof v === 'number') {
+        // SQLite serial types: 0=NULL, 1=int8, 2=int16, 4=int32, 6=int64, 7=float64, 8=0, 9=1
+        if (v === 0) { types.push(8); dataParts.push(new Uint8Array(0)); }
+        else if (v === 1) { types.push(9); dataParts.push(new Uint8Array(0)); }
+        else if (Number.isInteger(v) && v >= -2147483648 && v <= 2147483647) {
+          types.push(4); // 32-bit signed integer
+          var buf = new ArrayBuffer(4);
+          (new DataView(buf)).setInt32(0, v, false); // big-endian for SQLite
+          dataParts.push(new Uint8Array(buf));
+        } else if (Number.isInteger(v)) {
+          types.push(6); // 64-bit signed integer
+          var buf = new ArrayBuffer(8);
+          (new DataView(buf)).setInt32(0, 0, false); // high 32 bits
+          (new DataView(buf)).setInt32(4, v, false); // low 32 bits (big-endian)
+          dataParts.push(new Uint8Array(buf));
+        } else {
+          types.push(7); // IEEE float 64-bit
+          var buf = new ArrayBuffer(8);
+          (new DataView(buf)).setFloat64(0, v, false); // big-endian for SQLite
+          dataParts.push(new Uint8Array(buf));
+        }
+      } else if (typeof v === 'string') {
+        var u8 = enc.encode(v);
+        types.push(u8.length * 2 + 13); // text type
+        dataParts.push(u8);
+      } else if (v instanceof Uint8Array) {
+        types.push(v.length * 2 + 12); // blob type
+        dataParts.push(v);
+      } else {
+        // fallback: stringify
+        var s = String(v);
+        var u8b = enc.encode(s);
+        types.push(u8b.length * 2 + 13);
+        dataParts.push(u8b);
+      }
+    });
+
+    // Serialise header (type varints)
+    var hdrBytes = [];
+    var hdrSize = 0;
+    types.forEach(function (t) {
+      var tv = sqliteVarint(t);
+      hdrBytes = hdrBytes.concat(tv);
+      hdrSize += tv.length;
+    });
+    // Prepend overall header size as varint
+    var totalHdrSize = hdrSize;
+    var sizeVar = sqliteVarint(totalHdrSize + 1); // +1 for the size field itself
+    var allHdr = sizeVar.concat(hdrBytes);
+
+    var hdrU8 = new Uint8Array(allHdr);
+    // Concatenate data parts
+    var totalDataLen = 0;
+    dataParts.forEach(function (d) { totalDataLen += d.length; });
+    var dataU8 = new Uint8Array(totalDataLen);
+    var off = 0;
+    dataParts.forEach(function (d) { dataU8.set(d, off); off += d.length; });
+
+    return { header: hdrU8, data: dataU8, hdrLen: hdrU8.length, dataLen: totalDataLen };
+  }
+
+  // ---------------------------------------------------------------
+  // 5. SQLite b-tree leaf page builder
+  //    Creates a table leaf b-tree page (type 0x0D)
+  // ---------------------------------------------------------------
+  function buildLeafPage(pageSize, cells, rightMostPage) {
+    // Pre-compute cell payloads
+    var payloads = cells.map(function (c) {
+      return { rowId: c.rowId, record: buildRecord(c.values) };
+    });
+
+    // Calculate cell sizes and offsets (from end of page)
+    var cellSizes = payloads.map(function (p) {
+      var rowIdV = sqliteVarint(p.rowId);
+      var totalPayload = rowIdV.length + p.record.hdrLen + p.record.dataLen;
+      var plV = sqliteVarint(totalPayload);
+      return plV.length + totalPayload; // full cell size (payload varint + payload)
+    });
+
+    // Page header: 8 bytes
+    // [pageType:1][firstFreeblock:2][cellCount:2][contentOffset:2][fragFreeBytes:1]
+    var headerSize = 8;
+    var cellPtrSize = cells.length * 2;
+    var contentStart = headerSize + cellPtrSize;
+
+    // Compute content offsets (cells placed from end of page inward)
+    var cellOffsets = [];
+    var curOff = pageSize;
+    for (var i = 0; i < cells.length; i++) {
+      curOff -= cellSizes[i];
+      cellOffsets.push(curOff);
+    }
+
+    // Build the page
+    var page = new Uint8Array(pageSize);
+    var v = new DataView(page.buffer);
+
+    // Page header — SQLite uses big-endian for multi-byte integers
+    v.setUint8(0, 0x0D); // table leaf
+    v.setUint16(1, 0, false); // first freeblock
+    v.setUint16(3, cells.length, false); // cell count
+    // content area offset (first byte after the cell pointer array)
+    v.setUint16(5, contentStart, false);
+    v.setUint8(7, 0); // frag free bytes
+
+    // Cell pointer array (offsets from start of page, big-endian)
+    for (var ci = 0; ci < cells.length; ci++) {
+      v.setUint16(headerSize + ci * 2, cellOffsets[ci], false);
+    }
+
+    // Write cell content
+    for (var ci2 = 0; ci2 < cells.length; ci2++) {
+      var p = payloads[ci2];
+      var off = cellOffsets[ci2];
+      // Payload length varint
+      var rowIdV = sqliteVarint(p.rowId);
+      var payloadLen = rowIdV.length + p.record.hdrLen + p.record.dataLen;
+      var plV = sqliteVarint(payloadLen);
+      plV.forEach(function (b) { page[off++] = b; });
+      // Row ID varint
+      rowIdV.forEach(function (b) { page[off++] = b; });
+      // Record header
+      p.record.header.forEach(function (b) { page[off++] = b; });
+      // Record data
+      p.record.data.forEach(function (b) { page[off++] = b; });
+    }
+
+    return page;
+  }
+
+  // ---------------------------------------------------------------
+  // 6. SQLite header
+  // ---------------------------------------------------------------
+  function buildSQLiteHeader(numPages) {
+    var PAGE_SIZE = 1024;
+    var hdr = new Uint8Array(100);
+    var enc2 = new TextEncoder();
+    // Magic string
+    var magic = enc2.encode('SQLite format 3\0');
+    for (var i = 0; i < 16; i++) hdr[i] = magic[i];
+    // Page size
+    hdr[16] = (PAGE_SIZE >>> 8) & 0xFF;
+    hdr[17] = PAGE_SIZE & 0xFF;
+    // Write version: 1, Read version: 1
+    hdr[18] = 1; hdr[19] = 1;
+    // Reserved
+    hdr[20] = 0x00;
+    // Max embedded payload, min embedded, leaf payload
+    hdr[21] = 0x40; hdr[22] = 0x20; hdr[23] = 0x20;
+    // File change counter
+    hdr[24] = 0; hdr[25] = 0; hdr[26] = 0; hdr[27] = 0;
+    // Database size in pages
+    hdr[28] = (numPages >>> 24) & 0xFF;
+    hdr[29] = (numPages >>> 16) & 0xFF;
+    hdr[30] = (numPages >>> 8) & 0xFF;
+    hdr[31] = numPages & 0xFF;
+    // Freelist stuff
+    for (var fi = 32; fi < 52; fi++) hdr[fi] = 0;
+    // Schema cookie
+    hdr[52] = 0; hdr[53] = 0; hdr[54] = 0; hdr[55] = 1;
+    // Schema format
+    hdr[56] = 0; hdr[57] = 0; hdr[58] = 0; hdr[59] = 4;
+    // Default page cache
+    hdr[60] = 0; hdr[61] = 0; hdr[62] = 0; hdr[63] = 0;
+    // Largest root b-tree page
+    hdr[64] = 0; hdr[65] = 0; hdr[66] = 0; hdr[67] = 0;
+    // Text encoding: 1 = UTF-8
+    hdr[68] = 0; hdr[69] = 0; hdr[70] = 0; hdr[71] = 1;
+    // User version
+    hdr[72] = 0; hdr[73] = 0; hdr[74] = 0; hdr[75] = 0;
+    // Incremental vacuum
+    hdr[76] = 0; hdr[77] = 0; hdr[78] = 0; hdr[79] = 0;
+    // Application ID
+    hdr[80] = 0; hdr[81] = 0; hdr[82] = 0; hdr[83] = 0;
+    // Reserved 20 bytes
+    for (var ri = 84; ri < 92; ri++) hdr[ri] = 0;
+    for (var ri2 = 92; ri2 < 96; ri2++) hdr[ri2] = 0;
+    // Version valid for
+    hdr[92] = 0; hdr[93] = 0; hdr[94] = 0; hdr[95] = 1;
+    // SQLite version
+    hdr[96] = 0; hdr[97] = 0; hdr[98] = 0; hdr[99] = 0x01; // 3.x.y.z encoded
+
+    return hdr;
+  }
+
+  // ---------------------------------------------------------------
+  // 7. Assemble the GeoPackage
+  // ---------------------------------------------------------------
+  var PAGE_SIZE = 1024;
+  var enc = new TextEncoder();
+
+  // Metadata: SRS row (EPSG:4326)
+  var srsName = 'WGS 84 geodetic';
+  var srsOrg = 'EPSG';
+  var srsCode = '4326';
+  var srsDef = 'GEOGCS["WGS 84",DATUM["World Geodetic System 1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4326"]]';
+  var srsAuth = 'EPSG';
+
+  // ── Page assignment ──
+  // Page 1: header (100 bytes) + sqlite_master leaf page
+  // Page 2: gpkg_spatial_ref_sys leaf page (1 row)
+  // Page 3: gpkg_contents leaf page (1 row)
+  // Page 4: gpkg_geometry_columns leaf page (1 row)
+  // Pages 5+: percelen feature data
+
+  // We need to estimate how many pages for features.
+  // Each feature row: geometry (~varies) + attributes (~200 bytes)
+  // Average feature ~500 bytes WKB + 200 bytes attributes + overhead
+  // ~750 bytes per feature, ~1 feature per page at 1024 page size
+  var nFeatPages = Math.max(1, Math.ceil(feats.length * 0.75));
+  // But actually features might share pages, so let's be smarter.
+  // Pre-compute row sizes for feature table
+  var featRowSizes = [];
+  var totalFeatPayload = 0;
+  feats.forEach(function (f, fi) {
+    var geomBlob = encodeGPB(f.geometry);
+    var props = f.properties || {};
+    var crop = props.crop || props.CROP || props.gewas || props.GWS_GEWAS || '';
+    var group = props.crop_group || props.crop_grp || props.CROP_GRP || props.gewasgroep || '';
+    var cat = props.category || props.CATEGORY || props.categorie || '';
+    var areaHa = 0;
+    try { areaHa = turf.area(f) / 10000; } catch (e) {}
+    // row values: fid (int), geom (blob), crop (text), crop_grp (text), area_ha (real), category (text)
+    var r = buildRecord([fi + 1, geomBlob, crop, group, areaHa, cat]);
+    var rowIdV = sqliteVarint(fi + 1);
+    var payload = rowIdV.length + r.hdrLen + r.dataLen;
+    var plV = sqliteVarint(payload);
+    var cellSize = plV.length + payload;
+    featRowSizes.push(cellSize);
+    totalFeatPayload += cellSize + 2; // +2 for cell pointer
+  });
+
+  // Pages for features: each page has 8 bytes header + cell ptrs + content
+  var PAGE_DATA = PAGE_SIZE - 8; // available data per page (rough)
+  var pagesUsed = 0;
+  var currentPageData = 0;
+  featRowSizes.forEach(function (sz) {
+    // cell needs: 2 bytes pointer + content
+    var need = 2 + sz;
+    if (currentPageData + need > PAGE_DATA) {
+      pagesUsed++;
+      currentPageData = need;
+    } else {
+      currentPageData += need;
+    }
+  });
+  if (currentPageData > 0) pagesUsed++;
+  nFeatPages = Math.max(1, pagesUsed);
+
+  var totalPages = 4 + nFeatPages; // pages 1-4 for metadata, rest for features
+
+  // ── Build pages ──
+
+  // Page 1: Header (100) + sqlite_master leaf page (PAGE_SIZE - 100 = 924 bytes for content)
+  // sqlite_master columns: type, name, tbl_name, rootpage, sql
+  // Rows: gpkg_contents, gpkg_spatial_ref_sys, gpkg_geometry_columns, percelen
+  var masterCells = [
+    {
+      rowId: 1,
+      values: ['table', 'gpkg_contents', 'gpkg_contents', 3,
+        'CREATE TABLE gpkg_contents (table_name TEXT NOT NULL PRIMARY KEY,data_type TEXT NOT NULL,identifier TEXT unique,description TEXT DEFAULT \'\',last_change DATETIME NOT NULL DEFAULT (strftime(\'%Y-%m-%dT%H:%M:%fZ\',\'now\')),min_x DOUBLE,min_y DOUBLE,max_x DOUBLE,max_y DOUBLE,srs_id INTEGER,CONSTRAINT fk_gpkg_contents_srs_id FOREIGN KEY (srs_id) REFERENCES gpkg_spatial_ref_sys(srs_id))']
+    },
+    {
+      rowId: 2,
+      values: ['table', 'gpkg_spatial_ref_sys', 'gpkg_spatial_ref_sys', 2,
+        'CREATE TABLE gpkg_spatial_ref_sys (srs_name TEXT NOT NULL,srs_id INTEGER NOT NULL PRIMARY KEY,organization TEXT NOT NULL,organization_coordsys_id INTEGER NOT NULL,definition TEXT NOT NULL,description TEXT)']
+    },
+    {
+      rowId: 3,
+      values: ['table', 'gpkg_geometry_columns', 'gpkg_geometry_columns', 4,
+        'CREATE TABLE gpkg_geometry_columns (table_name TEXT NOT NULL,column_name TEXT NOT NULL,geometry_type_name TEXT NOT NULL,srs_id INTEGER NOT NULL,z TINYINT NOT NULL,m TINYINT NOT NULL,CONSTRAINT pk_geom_columns PRIMARY KEY (table_name, column_name))']
+    },
+    {
+      rowId: 4,
+      values: ['table', 'percelen', 'percelen', 5,
+        'CREATE TABLE percelen (fid INTEGER PRIMARY KEY AUTOINCREMENT,geom GEOMETRY NOT NULL,crop TEXT,crop_grp TEXT,area_ha REAL,category TEXT)']
+    },
+  ];
+
+  // Compute master page cells and content offsets
+  var masterPayloads = masterCells.map(function (c) {
+    return { rowId: c.rowId, record: buildRecord(c.values) };
+  });
+  var masterCellSizes = masterPayloads.map(function (p) {
+    var rv = sqliteVarint(p.rowId);
+    var pl = rv.length + p.record.hdrLen + p.record.dataLen;
+    var pv = sqliteVarint(pl);
+    return pv.length + pl;
+  });
+
+  // Master page: header + cell pointers + content
+  var masterPage = new Uint8Array(PAGE_SIZE);
+  // Copy header for page 1 (first 100 bytes are SQLite header)
+  var sqliteHdr = buildSQLiteHeader(totalPages);
+  for (var hi = 0; hi < 100; hi++) masterPage[hi] = sqliteHdr[hi];
+
+  // After the 100-byte DB header, we have the b-tree page header
+  // b-tree page header starts at offset 100 — all multi-byte ints are big-endian
+  var masterHdrOff = 100;
+  var vMaster = new DataView(masterPage.buffer);
+  vMaster.setUint8(masterHdrOff, 0x0D); // table leaf
+  vMaster.setUint16(masterHdrOff + 1, 0, false); // first freeblock
+  vMaster.setUint16(masterHdrOff + 3, masterCells.length, false); // cell count
+  var masterPtrOff = masterHdrOff + 8;
+  vMaster.setUint16(masterHdrOff + 5, masterPtrOff, false); // content offset (from page start)
+  vMaster.setUint8(masterHdrOff + 7, 0); // frag free
+
+  // Compute cell offsets (from end of page inward)
+  var masterCellOffsets = [];
+  var curMasterOff = PAGE_SIZE;
+  for (var mi = 0; mi < masterCells.length; mi++) {
+    curMasterOff -= masterCellSizes[mi];
+    masterCellOffsets.push(curMasterOff);
+  }
+
+  // Write cell pointers (big-endian)
+  for (var mpi = 0; mpi < masterCells.length; mpi++) {
+    vMaster.setUint16(masterPtrOff + mpi * 2, masterCellOffsets[mpi], false);
+  }
+
+  // Write cell content for master page
+  for (var mci = 0; mci < masterCells.length; mci++) {
+    var p = masterPayloads[mci];
+    var off = masterCellOffsets[mci];
+    var rowIdV = sqliteVarint(p.rowId);
+    var payloadLen = rowIdV.length + p.record.hdrLen + p.record.dataLen;
+    var plV = sqliteVarint(payloadLen);
+    plV.forEach(function (b) { masterPage[off++] = b; });
+    rowIdV.forEach(function (b) { masterPage[off++] = b; });
+    p.record.header.forEach(function (b) { masterPage[off++] = b; });
+    p.record.data.forEach(function (b) { masterPage[off++] = b; });
+  }
+
+  // ── Page 2: gpkg_spatial_ref_sys ──
+  var srsPage = buildLeafPage(PAGE_SIZE, [
+    { rowId: 1, values: [srsName, 4326, srsOrg, 4326, srsDef, null] },
+  ]);
+
+  // ── Page 3: gpkg_contents ──
+  var now2 = new Date();
+  var isoDate = now2.getUTCFullYear() + '-' +
+    String(now2.getUTCMonth() + 1).padStart(2, '0') + '-' +
+    String(now2.getUTCDate()).padStart(2, '0') + 'T' +
+    String(now2.getUTCHours()).padStart(2, '0') + ':' +
+    String(now2.getUTCMinutes()).padStart(2, '0') + ':' +
+    String(now2.getUTCSeconds()).padStart(2, '0') + 'Z';
+  // Compute overall bbox
+  var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  feats.forEach(function (f) {
+    try {
+      var bb = turf.bbox(f);
+      if (bb[0] < bx0) bx0 = bb[0]; if (bb[1] < by0) by0 = bb[1];
+      if (bb[2] > bx1) bx1 = bb[2]; if (bb[3] > by1) by1 = bb[3];
+    } catch (e) {}
+  });
+
+  var contentsPage = buildLeafPage(PAGE_SIZE, [
+    { rowId: 1, values: ['percelen', 'features', 'percelen', '', isoDate, bx0, by0, bx1, by1, 4326] },
+  ]);
+
+  // ── Page 4: gpkg_geometry_columns ──
+  var geomColPage = buildLeafPage(PAGE_SIZE, [
+    { rowId: 1, values: ['percelen', 'geom', 'GEOMETRY', 4326, 0, 0] },
+  ]);
+
+  // ── Pages 5+: percelen feature data ──
+  // Group features into pages
+  var featPages = [];
+  var currentPageCells = [];
+  var currentPagePayload = 0;
+  feats.forEach(function (f, fi) {
+    var geomBlob = encodeGPB(f.geometry);
+    var props = f.properties || {};
+    var crop = props.crop || props.CROP || props.gewas || props.GWS_GEWAS || '';
+    var group = props.crop_group || props.crop_grp || props.CROP_GRP || props.gewasgroep || '';
+    var cat = props.category || props.CATEGORY || props.categorie || '';
+    var areaHa = 0;
+    try { areaHa = turf.area(f) / 10000; } catch (e) {}
+
+    var cellValues = [fi + 1, geomBlob, crop, group, areaHa, cat];
+    // Calculate approximate cell size
+    var rec = buildRecord(cellValues);
+    var rv = sqliteVarint(fi + 1);
+    var pl = rv.length + rec.hdrLen + rec.dataLen;
+    var pv = sqliteVarint(pl);
+    var cellSizeEst = 2 + pv.length + pl; // 2 for cell pointer + content
+
+    if (currentPagePayload + cellSizeEst > (PAGE_SIZE - 8) && currentPageCells.length > 0) {
+      featPages.push(currentPageCells);
+      currentPageCells = [];
+      currentPagePayload = 0;
+    }
+    currentPageCells.push({ rowId: fi + 1, values: cellValues });
+    currentPagePayload += cellSizeEst;
+  });
+  if (currentPageCells.length > 0) featPages.push(currentPageCells);
+
+  // Build feature pages
+  var featPageBuffers = [];
+  featPages.forEach(function (pageCells) {
+    featPageBuffers.push(buildLeafPage(PAGE_SIZE, pageCells));
+  });
+
+  // ── Ensure we have at least nFeatPages pages ──
+  while (featPageBuffers.length < nFeatPages) {
+    // Empty page
+    var emptyPage = new Uint8Array(PAGE_SIZE);
+    emptyPage[0] = 0x0D; // table leaf with 0 cells
+    featPageBuffers.push(emptyPage);
+  }
+
+  // ── Final assembly ──
+  var allPages = [masterPage, srsPage, contentsPage, geomColPage].concat(featPageBuffers);
+  var totalSize = allPages.length * PAGE_SIZE;
+  var finalBuf = new ArrayBuffer(totalSize);
+  var finalView = new Uint8Array(finalBuf);
+  var outOff = 0;
+  allPages.forEach(function (page) {
+    finalView.set(page, outOff);
+    outOff += page.length;
+  });
+
+  // Patch the database size in the header
+  var actualPages = allPages.length;
+  finalView[28] = (actualPages >>> 24) & 0xFF;
+  finalView[29] = (actualPages >>> 16) & 0xFF;
+  finalView[30] = (actualPages >>> 8) & 0xFF;
+  finalView[31] = actualPages & 0xFF;
+
+  return new Blob([finalBuf], { type: 'application/geopackage+sqlite3' });
 }

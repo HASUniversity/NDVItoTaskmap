@@ -7,13 +7,13 @@
    buttons (Next / Back) and advanced-options toggles.
    =================================================== */
 
-import { state } from './state.js';
-import { drawNDVIHistogram } from './ndvi.js';
+import { state } from './state.js?v=1';
+import { drawNDVIHistogram, addContourToOverlay } from './ndvi.js?v=1';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 
-import { isMobileUI, showLegendInPanel } from './map.js';
+import { isMobileUI, showLegendInPanel, ndviOverlay } from './map.js?v=1';
 
 /**
  * Update the step progress indicator at the top of the sidebar
@@ -47,6 +47,11 @@ export function activateStep(n) {
   updateProgress(n);
   if (n >= 3) showLegendInPanel();
   if (n === 4) setTimeout(drawNDVIHistogram, 400);
+  if (n === 5) window.dispatchEvent(new CustomEvent('step:activated', { detail: { step: 5 } }));
+  // Refresh contour when stepping through the wizard
+  if (state.georaster) {
+    try { addContourToOverlay(ndviOverlay); } catch (_) {}
+  }
   // Scroll the new step into view on mobile
   if (isMobileUI()) {
     const stepEl = $('#step-' + n);

@@ -74,9 +74,17 @@ export function hideLoading() {
  */
 export function toast(msg, isError) {
   toastEl.textContent = msg;
-  toastEl.className = 'toast visible' + (isError ? ' error' : '');
+  toastEl.classList.toggle('error', !!isError);
+  toastEl.classList.remove('hidden');
+  // Force reflow so the browser registers the element as visible
+  // before adding .visible — guarantees the CSS opacity transition plays.
+  void toastEl.offsetWidth;
+  toastEl.classList.add('visible');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toastEl.className = 'toast hidden'; }, 4000);
+  toastTimer = setTimeout(() => {
+    toastEl.classList.remove('visible');
+    setTimeout(() => toastEl.classList.add('hidden'), 300);
+  }, 3200);
 }
 
 /**

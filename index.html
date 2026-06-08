@@ -6,7 +6,7 @@
   <title>Taakkaart Generator</title>
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🌾</text></svg>" />
   <link rel="stylesheet" href="static/vendor/leaflet.css" />
-  <link rel="stylesheet" href="static/styles.css?v=28" />
+  <link rel="stylesheet" href="static/styles.css?v=38" />
 </head>
 <body>
   <div class="app">
@@ -36,12 +36,12 @@
           </div>
           <div class="step-progress-item" data-progress="2">
             <div class="step-progress-dot"><span>2</span></div>
-            <span class="step-progress-label" data-i18n="step2label">Index</span>
+            <span class="step-progress-label" data-i18n="step2label">Percelen</span>
             <div class="step-progress-line"></div>
           </div>
           <div class="step-progress-item" data-progress="3">
             <div class="step-progress-dot"><span>3</span></div>
-            <span class="step-progress-label" data-i18n="step3label">Percelen</span>
+            <span class="step-progress-label" data-i18n="step3label">Index</span>
             <div class="step-progress-line"></div>
           </div>
           <div class="step-progress-item" data-progress="4">
@@ -82,7 +82,7 @@
               <div class="info-row"><span class="label" data-i18n="labelDims">Afmetingen:</span><span id="info-dims"></span></div>
               <div class="info-row"><span class="label" data-i18n="labelBands">Banden:</span><span id="info-bands"></span></div>
               <div class="info-row"><span class="label" data-i18n="labelMode">Modus:</span><span id="info-mode"></span></div>
-              <div id="ndvi-stats-row" class="info-row hidden"><span class="label" data-i18n="labelNdviRange">NDVI bereik:</span><span id="info-ndvi-range"></span></div>
+              <div id="ndvi-stats-row" class="info-row hidden"><span class="label" id="vi-range-label">NDVI bereik:</span><span id="info-ndvi-range"></span></div>
               <div id="band-info-row" class="info-row hidden" style="flex-direction:column;gap:4px">
                 <span class="label" data-i18n="labelBands">Banden:</span>
                 <table id="band-info-table" style="font-size:11px;border-collapse:collapse;width:100%"></table>
@@ -95,25 +95,67 @@
           </div>
         </section>
 
-        <!-- STEP 2: Band selectie -->
+        <!-- STEP 2: Percelen selecteren -->
         <section class="step disabled" data-step="2" id="step-2">
           <div class="step-header" data-toggle="2">
             <div class="step-indicator"><span>2</span></div>
-            <h2 data-i18n="step2">Banden &amp; Index</h2>
-            <span class="step-status-badge" id="step2-badge" data-i18n="step2label">Index</span>
+            <h2 data-i18n="step2">Percelen Selecteren</h2>
+            <span class="step-status-badge" id="step2-badge" data-i18n="step2label">Percelen</span>
           </div>
           <div class="step-body">
-            <p class="step-desc" id="band-desc" data-i18n="step2Desc">Selecteer de banden en vegetatie-index.</p>
+            <p class="step-desc" data-i18n="step2Desc">Klik op een perceel om het te selecteren of te deselecteren. Meerdere percelen zijn mogelijk.</p>
+            <div id="parcel-info" class="hidden">
+              <div class="info-row"><span class="label" data-i18n="labelSelected">Geselecteerd:</span><span id="parcel-count"></span></div>
+              <div class="info-row"><span class="label" data-i18n="labelArea">Totale oppervlakte:</span><span id="parcel-area"></span></div>
+              <div id="parcel-list" style="margin-top:6px;max-height:240px;overflow-y:auto"></div>
+              <button class="btn btn-small btn-outline" id="clear-parcels-btn" style="margin-top:8px;width:100%" data-i18n="btnClearParcels">Deselecteer alles</button>
+
+              <!-- Tussentijdse export — perceel-geometrie download -->
+              <div class="quick-export-card">
+                <div class="quick-export-head">
+                  <span class="quick-export-icon">📥</span>
+                  <span class="quick-export-title" data-i18n="quickExportTitle">Tussentijdse export</span>
+                </div>
+                <p class="quick-export-desc" data-i18n="quickExportParcelDesc">Download de geometrie van de geselecteerde percelen — bruikbaar voor scouting, analyse of een ander GIS-pakket.</p>
+                <button class="btn btn-small btn-outline" id="export-parcels-shp-btn" style="margin-top:6px">
+                  🗺 Percelen (Shapefile)
+                </button>
+                <button class="btn btn-small btn-outline" id="export-parcels-gpkg-btn" style="margin-top:4px">
+                  🗺 Percelen (GeoPackage)
+                </button>
+              </div>
+            </div>
+            <p class="hint" id="parcel-hint" data-i18n="parcelHint">Zoom verder in om BRP percelen te laden (zoom ≥ 14).</p>
+            <!-- Navigatie -->
+            <div class="step-nav">
+              <button class="btn btn-back btn-prev" data-prev="1" data-i18n="btnBack">Vorige</button>
+              <button class="btn btn-primary btn-next" data-next="3" data-i18n="btnNext">Volgende</button>
+              <button class="btn btn-primary" id="goto-step4-btn" data-i18n="btnContinueToAnalysis">
+                Verder: Data analyse →
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- STEP 3: Band selectie -->
+        <section class="step disabled" data-step="3" id="step-3">
+          <div class="step-header" data-toggle="3">
+            <div class="step-indicator"><span>3</span></div>
+            <h2 data-i18n="step3">Banden &amp; Index</h2>
+            <span class="step-status-badge" id="step3-badge" data-i18n="step3label">Index</span>
+          </div>
+          <div class="step-body">
+            <p class="step-desc" id="band-desc" data-i18n="step3Desc">Selecteer de banden en vegetatie-index.</p>
             <div id="band-selectors">
               <div class="form-row">
                 <label for="vi-select" data-i18n="labelVI">Vegetatie-index</label>
-                <select id="vi-select">
-                  <option value="NDVI">NDVI — (NIR − R) / (NIR + R)</option>
-                  <option value="GNDVI">GNDVI — (NIR − G) / (NIR + G)</option>
-                  <option value="NDRE">NDRE — (NIR − RE) / (NIR + RE)</option>
-                  <option value="SAVI">SAVI — 1.5·(NIR − R) / (NIR + R + 0.5)</option>
-                  <option value="OSAVI">OSAVI — (NIR − R) / (NIR + R + 0.16)</option>
-                </select>
+                <select id="vi-select"></select>
+              </div>
+              <!-- Formule-info paneel -->
+              <div id="vi-info" class="vi-info" style="display:none">
+                <div class="vi-formula" id="vi-formula"></div>
+                <div class="vi-desc" id="vi-desc"></div>
+                <div class="vi-details" id="vi-details"></div>
               </div>
               <div class="advanced-toggle-wrap">
                 <button class="advanced-toggle-btn" id="advanced-bands-toggle" type="button">
@@ -128,6 +170,10 @@
                   <div class="form-row">
                     <label for="green-band">Green band</label>
                     <select id="green-band"></select>
+                  </div>
+                  <div class="form-row">
+                    <label for="blue-band">Blue band</label>
+                    <select id="blue-band"></select>
                   </div>
                   <div class="form-row">
                     <label for="nir-band">NIR band</label>
@@ -154,46 +200,8 @@
             <button class="btn btn-primary" id="compute-ndvi-btn" data-i18n="btnComputeNDVI">Bereken index</button>
             <!-- Navigatie -->
             <div class="step-nav">
-              <button class="btn btn-back btn-prev" data-prev="1" data-i18n="btnBack">Vorige</button>
-              <button class="btn btn-primary btn-next" data-next="3" data-i18n="btnNext">Volgende</button>
-            </div>
-          </div>
-        </section>
-
-        <!-- STEP 3: Percelen selecteren -->
-        <section class="step disabled" data-step="3" id="step-3">
-          <div class="step-header" data-toggle="3">
-            <div class="step-indicator"><span>3</span></div>
-            <h2 data-i18n="step3">Percelen Selecteren</h2>
-            <span class="step-status-badge" id="step3-badge" data-i18n="step3label">Percelen</span>
-          </div>
-          <div class="step-body">
-            <p class="step-desc" data-i18n="step3Desc">Klik op een perceel om het te selecteren of te deselecteren. Meerdere percelen zijn mogelijk.</p>
-            <div id="parcel-info" class="hidden">
-              <div class="info-row"><span class="label" data-i18n="labelSelected">Geselecteerd:</span><span id="parcel-count"></span></div>
-              <div class="info-row"><span class="label" data-i18n="labelArea">Totale oppervlakte:</span><span id="parcel-area"></span></div>
-              <div id="parcel-list" style="margin-top:6px;max-height:240px;overflow-y:auto"></div>
-              <button class="btn btn-small btn-outline" id="clear-parcels-btn" style="margin-top:8px;width:100%" data-i18n="btnClearParcels">Deselecteer alles</button>
-
-              <!-- Tussentijdse export — losse "off-ramp" voor wie alleen de geknipte NDVI wil -->
-              <div class="quick-export-card">
-                <div class="quick-export-head">
-                  <span class="quick-export-icon">📥</span>
-                  <span class="quick-export-title" data-i18n="quickExportTitle">Tussentijdse export</span>
-                </div>
-                <p class="quick-export-desc" data-i18n="quickExportDesc">Download alleen de NDVI uitsnede van de geselecteerde percelen — bruikbaar voor scouting, analyse of een ander GIS-pakket.</p>
-                <button class="btn btn-small btn-outline" id="export-ndvi-tif-btn" data-i18n="btnExportNdviTiff" title="Knip de NDVI op de selectie en exporteer als GeoTIFF in de bron-CRS">
-                  ⬇ Veld-NDVI (GeoTIFF)
-                </button>
-              </div>
-            </div>
-            <p class="hint" id="parcel-hint" data-i18n="parcelHint">Zoom verder in om BRP percelen te laden (zoom ≥ 14).</p>
-            <!-- Navigatie -->
-            <div class="step-nav">
               <button class="btn btn-back btn-prev" data-prev="2" data-i18n="btnBack">Vorige</button>
-              <button class="btn btn-primary" id="goto-step4-btn" data-i18n="btnContinueToAnalysis">
-                Verder: Data analyse →
-              </button>
+              <button class="btn btn-primary btn-next" data-next="4" data-i18n="btnNext">Volgende</button>
             </div>
           </div>
         </section>
@@ -208,7 +216,7 @@
           <div class="step-body">
 
             <div id="ndvi-histogram-wrap" style="display:none;margin-bottom:12px">
-              <div style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px" data-i18n="labelNdviDist">NDVI verdeling</div>
+              <div style="font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px" id="histogram-title">Index verdeling</div>
               <canvas id="ndvi-histogram" height="60" style="width:100%;display:block;border-radius:4px;background:#0d1117"></canvas>
             </div>
 
@@ -312,17 +320,7 @@
                 <span data-i18n="advancedShow">Geavanceerde opties</span>
               </button>
               <div class="advanced-content" id="advanced-taskmap-content">
-
-                <div class="form-row">
-                  <label for="ahn-select" data-i18n="lcAHN">AHN4 Hoogte</label>
-                  <select id="ahn-select">
-                    <option value="off" data-i18n="lcAhnOff">Uit</option>
-                    <option value="dtm" data-i18n="lcAhnDtm">DTM (maaiveld)</option>
-                    <option value="dsm" data-i18n="lcAhnDsm">DSM (oppervlak)</option>
-                  </select>
-                </div>
-
-              </div>
+                <!-- AHN is now in the legend (ULC panel) — not here -->
             </div>
 
             <!-- Navigatie -->
@@ -344,12 +342,12 @@
             <div id="export-stats"></div>
             <div class="form-row">
               <label for="export-name" data-i18n="labelExportName">Bestandsnaam</label>
-              <input type="text" id="export-name" value="taakkaart" placeholder="taakkaart" />
+              <input type="text" id="export-name" placeholder="bron_20250602_taskmap" />
             </div>
             <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
               <button class="btn btn-primary" id="export-shp-btn">
                 <svg viewBox="0 0 20 20" class="btn-icon"><path d="M10 1v12m0 0l-4-4m4 4l4-4M3 15v2a2 2 0 002 2h10a2 2 0 002-2v-2"/></svg>
-                Shapefile — ArcGIS, QGIS, John Deere Ops
+                Shapefile — PTx, ArcGIS, QGIS, FarmServ, John Deere
               </button>
               <button class="btn btn-outline" id="export-isoxml-btn">
                 🚜 ISOXML TaskData — ISOBUS Task Controller
@@ -359,6 +357,9 @@
               </button>
               <button class="btn btn-outline" id="export-csv-btn">
                 CSV — Excel, FMIS, Agromanager
+              </button>
+              <button class="btn btn-outline" id="export-ndvi-tif-step6-btn">
+                🌿 Veld-NDVI (GeoTIFF) — geknipte index per perceel
               </button>
             </div>
             <!-- Navigatie -->
@@ -397,8 +398,61 @@
   <script src="static/vendor/turf.min.js"></script>
   <script src="static/vendor/geotiff.js"></script>
   <!-- i18n (must load before app.js) -->
-  <script src="static/i18n.js?v=3"></script>
+  <script src="static/i18n.js?v=4"></script>
   <!-- App -->
-  <script type="module" src="static/app.js?v=28"></script>
+  <script type="module" src="static/app.js?v=33"></script>
+  <!-- DIRECT — legend only visible after "Bereken index" -->
+  <style>
+    .ulc-ndvi-section { display: none !important; }
+    .ulc-ndvi-section.visible { display: block !important; }
+  </style>
+  <script>
+  (function() {
+    'use strict';
+    var LABELS = {
+      NDVI:'NDVI', NDVI_Blue:'NDVI (Blauw)', NDRE:'NDRE',
+      GNDVI:'GNDVI', GRVI:'GRVI', NDWI:'NDWI',
+      SAVI:'SAVI', OSAVI:'OSAVI', MNLI:'MNLI',
+      EVI:'EVI', LAI:'LAI', LAI_SAVI:'LAI (SAVI)', LAI_NDRE:'LAI (NDRE)',
+      ARVI:'ARVI', ENDVI:'ENDVI', MSR:'MSR',
+      RDVI:'RDVI', TDVI:'TDVI', BAI:'BAI',
+      NGRDI:'NGRDI', VARI:'VARI', TGI:'TGI',
+      MPRI:'MPRI', EXG:'EXG', GLI:'GLI',
+      vNDVI:'vNDVI', NDYI:'NDYI'
+    };
+
+    function updateLabels() {
+      var sel = document.getElementById('vi-select');
+      if (!sel || !sel.value) return;
+      var label = LABELS[sel.value] || sel.value;
+      var lt = document.getElementById('vi-checkbox-label');
+      if (lt) lt.textContent = label;
+      var pr = document.querySelector('[data-i18n="step3label"]');
+      if (pr) pr.textContent = label;
+    }
+
+    // Toon legenda + update label na "Bereken index"
+    document.addEventListener('click', function(e) {
+      if (e.target && e.target.id === 'compute-ndvi-btn') {
+        setTimeout(function() {
+          document.querySelectorAll('.ulc-ndvi-section').forEach(function(el) {
+            el.classList.add('visible');
+          });
+          updateLabels();
+        }, 600);
+      }
+    });
+
+    // Update label bij VI-select change
+    document.addEventListener('change', function(e) {
+      if (e.target && e.target.id === 'vi-select') {
+        updateLabels();
+      }
+    });
+
+    // Eenmalig bij laden
+    setTimeout(updateLabels, 1500);
+  })();
+  </script>
 </body>
 </html>

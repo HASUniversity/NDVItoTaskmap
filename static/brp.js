@@ -12,12 +12,12 @@
      - Crop history sidebar with per-parcel caching
    =================================================== */
 
-import { state, BRP_WFS_URL, MIN_ZOOM_BRP } from './state.js';
-import { debounce, toast, escapeHtml } from './utils.js';
-import { map, brpOverlay, selectionOverlay, clearLegendCrop, updateLegendCrop, refreshAhnOverlay, setAhnMode } from './map.js';
-import { clipNDVIToParcel, drawNDVIHistogram, autoClassifyFromData } from './ndvi.js';
-import { activateStep } from './steps.js';
-import { renderClasses } from './taskmap.js';
+import { state, BRP_WFS_URL, MIN_ZOOM_BRP } from './state.js?v=1';
+import { debounce, toast, escapeHtml } from './utils.js?v=1';
+import { map, brpOverlay, selectionOverlay, clearLegendCrop, updateLegendCrop, updateLayerVisibility } from './map.js?v=1';
+import { clipNDVIToParcel, drawNDVIHistogram, autoClassifyFromData } from './ndvi.js?v=1';
+import { activateStep } from './steps.js?v=1';
+import { renderClasses } from './taskmap.js?v=1';
 
 const { t, tf } = window;
 
@@ -34,6 +34,29 @@ let _brpAbortController = null;
 function _sameFeature(a, b) {
   if (a.id && b.id) return a.id === b.id;
   return JSON.stringify(a.geometry) === JSON.stringify(b.geometry);
+}
+
+/**
+ * Builds a WFS 2.0.0 XML POST body targeting the BRP Gewaspercelen
+ * endpoint. Only the `<fes:Filter>…</fes:Filter>` fragment varies per
+ * call site (BBOX, Intersects, etc.).
+ * @param {string}  filterXml - The filter fragment (without outer `<fes:Filter>`).
+ * @param {number}  [count]   - Optional feature count limit.
+ * @returns {string} Complete WFS XML body.
+ */
+function _wfsBody(filterXml, count) {
+  const countAttr = count ? ' count="' + count + '"' : '';
+  return '<?xml version="1.0" encoding="UTF-8"?>' +
+    '<wfs:GetFeature service="WFS" version="2.0.0"' + countAttr + ' ' +
+    'xmlns:wfs="http://www.opengis.net/wfs/2.0" ' +
+    'xmlns:fes="http://www.opengis.net/fes/2.0" ' +
+    'xmlns:gml="http://www.opengis.net/gml/3.2" ' +
+    'xmlns:brpgewaspercelen="http://brpgewaspercelen.geonovum.nl" ' +
+    'outputFormat="application/json">' +
+    '<wfs:Query typeNames="brpgewaspercelen:BrpGewas" srsName="urn:ogc:def:crs:EPSG::4326">' +
+    '<fes:Filter>' + filterXml + '</fes:Filter>' +
+    '</wfs:Query>' +
+    '</wfs:GetFeature>';
 }
 
 // ==========================================
@@ -69,26 +92,16 @@ async function loadBRP() {
     const sw = proj4('EPSG:4326', 'EPSG:28992', [b.getWest(), b.getSouth()]);
     const ne = proj4('EPSG:4326', 'EPSG:28992', [b.getEast(), b.getNorth()]);
 
-    const body =
-      '<?xml version="1.0" encoding="UTF-8"?>' +
-      '<wfs:GetFeature service="WFS" version="2.0.0" count="500" ' +
-      'xmlns:wfs="http://www.opengis.net/wfs/2.0" ' +
-      'xmlns:fes="http://www.opengis.net/fes/2.0" ' +
-      'xmlns:gml="http://www.opengis.net/gml/3.2" ' +
-      'xmlns:brpgewaspercelen="http://brpgewaspercelen.geonovum.nl" ' +
-      'outputFormat="application/json">' +
-      '<wfs:Query typeNames="brpgewaspercelen:BrpGewas" srsName="urn:ogc:def:crs:EPSG::4326">' +
-      '<fes:Filter>' +
+    const body = _wfsBody(
       '<fes:BBOX>' +
       '<fes:ValueReference>brpgewaspercelen:geom</fes:ValueReference>' +
       '<gml:Envelope srsName="EPSG:28992">' +
       '<gml:lowerCorner>' + sw[0] + ' ' + sw[1] + '</gml:lowerCorner>' +
       '<gml:upperCorner>' + ne[0] + ' ' + ne[1] + '</gml:upperCorner>' +
       '</gml:Envelope>' +
-      '</fes:BBOX>' +
-      '</fes:Filter>' +
-      '</wfs:Query>' +
-      '</wfs:GetFeature>';
+      '</fes:BBOX>',
+      500
+    );
 
     const resp = await fetch(BRP_WFS_URL, {
       method: 'POST',
@@ -114,7 +127,7 @@ async function loadBRP() {
         });
         layer.on('mouseout', function () {
           if (isParcelSelected(feature)) {
-            layer.setStyle({ color: '#00E5FF', fillColor: '#00E5FF', fillOpacity: 0.25, weight: 4 });
+            layer.setStyle({ color: '#0066FF', weight: 5, fillOpacity: 0 });
           } else {
             layer.setStyle({ color: '#FFE000', fillColor: null, fillOpacity: 0.06, weight: 3 });
           }
@@ -128,6 +141,10 @@ async function loadBRP() {
 
     const count = data.features ? data.features.length : 0;
     if (hint) hint.textContent = tf('parcelHintLoaded', count);
+    refreshBRPLayerStyles();
+    updateLayerVisibility();
+    // Keep selection overlay on top after BRP re-render
+    if (state.selectedParcels.length > 0) selectionOverlay.bringToFront();
   } catch (err) {
     if (err.name === 'AbortError') return; // superseded by a newer request
     console.error('BRP laden mislukt:', err);
@@ -154,14 +171,14 @@ export function isParcelSelected(feature) {
 
 /**
  * Applies the correct Leaflet style to every BRP layer entry based on
- * whether it is currently selected.  Selected parcels use the cyan highlight;
- * unselected parcels revert to the default yellow outline.
+ * whether it is currently selected.  Selected parcels use a thicker yellow
+ * border; unselected parcels revert to the default yellow outline.
  */
 export function refreshBRPLayerStyles() {
   if (!state.brpLayerMap) return;
   Object.values(state.brpLayerMap).forEach(function (entry) {
     if (isParcelSelected(entry.feature)) {
-      entry.layer.setStyle({ color: '#00E5FF', fillColor: '#00E5FF', fillOpacity: 0.25, weight: 4 });
+      entry.layer.setStyle({ color: '#0066FF', weight: 5, fillOpacity: 0 });
     } else {
       entry.layer.setStyle({ color: '#FFE000', fillColor: null, fillOpacity: 0.06, weight: 3 });
     }
@@ -194,20 +211,21 @@ export function toggleParcel(feature) {
 export function updateSelectionDisplay(fitBounds) {
   selectionOverlay.clearLayers();
 
-  // refresh AHN height overlay for the new selection
-  refreshAhnOverlay();
+  // AHN and Bodemkaart are full-viewport WMS layers, no need to refresh
 
   if (state.selectedParcels.length === 0) {
     document.querySelector('#parcel-info').classList.add('hidden');
     clearLegendCrop();
     if (state.ndviGrid && state.georaster) clipNDVIToParcel(null);
+    updateLayerVisibility();
     return;
   }
 
   const fc = { type: 'FeatureCollection', features: state.selectedParcels };
   state.selectedParcelsLayer = L.geoJSON(fc, {
-    style: { color: '#00E5FF', weight: 4, fillColor: '#00E5FF', fillOpacity: 0.30, interactive: false }
+    style: { color: '#0066FF', weight: 5, fillOpacity: 0, interactive: false }
   }).addTo(selectionOverlay);
+  selectionOverlay.bringToFront();
 
   if (fitBounds) map.fitBounds(state.selectedParcelsLayer.getBounds(), { padding: [60, 60] });
 
@@ -251,14 +269,15 @@ export function updateSelectionDisplay(fitBounds) {
     if (state.classificationMethod !== 'manual') {
       autoClassifyFromData();
     }
-    // Advance to Data Analyse step if we're still on step 3
-    if (state.currentStep === 3) {
+    // Advance to Data Analyse step if we're still on step 2 (Percelen)
+    if (state.currentStep === 2) {
       activateStep(4);
     }
   } else {
     console.warn('[Selection] No ndviGrid or georaster - skipping clip+classify');
   }
   renderClasses();
+  updateLayerVisibility();
 }
 
 // "Continue → Data Analyse" handler is now in taskmap.js
@@ -270,31 +289,22 @@ export function updateSelectionDisplay(fitBounds) {
 // performs a point-query WFS request so users can still select
 // parcels by clicking the map when the layer hasn't pre-loaded.
 map.on('click', async function (e) {
-  if (state.currentStep < 3 || !state.georaster) return;
+  if (state.currentStep < 2 || !state.georaster) return;
   if (map.getZoom() < MIN_ZOOM_BRP) return;
   if (state.brpLayer && state.brpGeoJSON && state.brpGeoJSON.features && state.brpGeoJSON.features.length > 0) return;
   try {
     const pt = proj4('EPSG:4326', 'EPSG:28992', [e.latlng.lng, e.latlng.lat]);
-    const body =
-      '<?xml version="1.0" encoding="UTF-8"?>' +
-      '<wfs:GetFeature service="WFS" version="2.0.0" ' +
-      'xmlns:wfs="http://www.opengis.net/wfs/2.0" ' +
-      'xmlns:fes="http://www.opengis.net/fes/2.0" ' +
-      'xmlns:gml="http://www.opengis.net/gml/3.2" ' +
-      'xmlns:brpgewaspercelen="http://brpgewaspercelen.geonovum.nl" ' +
-      'outputFormat="application/json">' +
-      '<wfs:Query typeNames="brpgewaspercelen:BrpGewas" srsName="urn:ogc:def:crs:EPSG::4326">' +
-      '<fes:Filter>' +
+    const body = _wfsBody(
       '<fes:Intersects>' +
       '<fes:ValueReference>brpgewaspercelen:geom</fes:ValueReference>' +
       '<gml:Point srsName="EPSG:28992"><gml:pos>' + pt[0] + ' ' + pt[1] + '</gml:pos></gml:Point>' +
-      '</fes:Intersects>' +
-      '</fes:Filter>' +
-      '</wfs:Query>' +
-      '</wfs:GetFeature>';
+      '</fes:Intersects>'
+    );
     const resp = await fetch(BRP_WFS_URL, { method: 'POST', headers: { 'Content-Type': 'text/xml;charset=UTF-8' }, body });
     const data = await resp.json();
-    if (data.features && data.features.length > 0) toggleParcel(data.features[0]);
+    if (data.features && data.features.length > 0) {
+      toggleParcel(data.features[0]);
+    }
   } catch (err) { console.error(err); }
 });
 
@@ -309,16 +319,7 @@ if (clearParcelsBtn) {
   });
 }
 
-// AHN layer selector in sidebar
-const ahnSelect = document.querySelector('#ahn-select');
-if (ahnSelect) {
-  ahnSelect.addEventListener('change', function () {
-    setAhnMode(ahnSelect.value);
-    // Sync the radio buttons in the layer control panel
-    const radio = document.querySelector('input[name="ahn"][value="' + ahnSelect.value + '"]');
-    if (radio) radio.checked = true;
-  });
-}
+// AHN is now controlled via the legend (ULC panel) — no sidebar selector needed
 
 // ==========================================
 // CROP HISTORY
@@ -365,23 +366,13 @@ async function loadParcelHistory(feature, idx) {
   catch (e) { histEl.innerHTML = '<span class="phi-error">' + t('cropHistError') + '</span>'; return; }
 
   const pt28992 = proj4('EPSG:4326', 'EPSG:28992', centroid);
-  const body =
-    '<?xml version="1.0" encoding="UTF-8"?>' +
-    '<wfs:GetFeature service="WFS" version="2.0.0" count="50" ' +
-    'xmlns:wfs="http://www.opengis.net/wfs/2.0" ' +
-    'xmlns:fes="http://www.opengis.net/fes/2.0" ' +
-    'xmlns:gml="http://www.opengis.net/gml/3.2" ' +
-    'xmlns:brpgewaspercelen="http://brpgewaspercelen.geonovum.nl" ' +
-    'outputFormat="application/json">' +
-    '<wfs:Query typeNames="brpgewaspercelen:BrpGewas" srsName="urn:ogc:def:crs:EPSG::4326">' +
-    '<fes:Filter>' +
+  const body = _wfsBody(
     '<fes:Intersects>' +
     '<fes:ValueReference>brpgewaspercelen:geom</fes:ValueReference>' +
     '<gml:Point srsName="EPSG:28992"><gml:pos>' + pt28992[0] + ' ' + pt28992[1] + '</gml:pos></gml:Point>' +
-    '</fes:Intersects>' +
-    '</fes:Filter>' +
-    '</wfs:Query>' +
-    '</wfs:GetFeature>';
+    '</fes:Intersects>',
+    50
+  );
 
   try {
     const resp = await fetch(BRP_WFS_URL, { method: 'POST', headers: { 'Content-Type': 'text/xml;charset=UTF-8' }, body });

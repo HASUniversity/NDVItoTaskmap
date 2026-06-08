@@ -10,11 +10,151 @@
      5. Equal-area auto-classification (autoClassifyFromData)
    =================================================== */
 
-import { state } from './state.js';
-import { toast } from './utils.js';
-import { map, ndviOverlay, legend, showLegendInPanel, setLegendLabels } from './map.js';
+import { state, VEGETATION_INDICES } from './state.js?v=1';
+import { toast } from './utils.js?v=1';
+import { map, ndviOverlay, legend, showLegendInPanel, setLegendLabels } from './map.js?v=1';
 
 const { t } = window;
+
+// ==========================================
+// VI COMPUTATION ENGINE
+// ==========================================
+
+/**
+ * Computes a vegetation/spectral index value from raw band reflectances.
+ * Each case implements the exact formula from VEGETATION_INDICES.
+ * Returns NaN for invalid inputs (no-data, division by zero, etc.).
+ *
+ * @param {string} vi  - Index identifier (e.g. 'NDVI', 'EVI', 'VARI').
+ * @param {number} nir - NIR band value (or NaN if not used).
+ * @param {number} r   - Red band value.
+ * @param {number} g   - Green band value.
+ * @param {number} b   - Blue band value.
+ * @param {number} re  - RedEdge band value.
+ * @returns {number} Computed index value, or NaN on failure.
+ */
+function computeVI(vi, nir, r, g, b, re) {
+  switch (vi) {
+    // ── NIR-based indices ──
+    case 'NDVI': {
+      const s = nir + r; if (s === 0) return NaN;
+      return (nir - r) / s;
+    }
+    case 'NDVI_Blue': {
+      const s = nir + b; if (s === 0) return NaN;
+      return (nir - b) / s;
+    }
+    case 'NDRE': {
+      const s = nir + re; if (s === 0) return NaN;
+      return (nir - re) / s;
+    }
+    case 'GNDVI': {
+      const s = nir + g; if (s === 0) return NaN;
+      return (nir - g) / s;
+    }
+    case 'GRVI': {
+      if (g === 0) return NaN;
+      return nir / g;
+    }
+    case 'NDWI': {
+      const s = g + nir; if (s === 0) return NaN;
+      return (g - nir) / s;
+    }
+    case 'SAVI': {
+      const denom = nir + r + 0.5; if (denom === 0) return NaN;
+      return 1.5 * (nir - r) / denom;
+    }
+    case 'OSAVI': {
+      const denom = nir + r + 0.16; if (denom === 0) return NaN;
+      return (nir - r) / denom;
+    }
+    case 'MNLI': {
+      const nir2 = nir * nir;
+      const denom = nir2 + r + 0.5; if (denom === 0) return NaN;
+      return 1.5 * (nir2 - r) / denom;
+    }
+    case 'EVI': {
+      const denom = nir + 6 * r - 7.5 * b + 1; if (denom === 0) return NaN;
+      return 2.5 * (nir - r) / denom;
+    }
+    case 'LAI': {
+      const denom = nir + 6 * r - 7.5 * b + 1; if (denom === 0) return NaN;
+      const evi = 2.5 * (nir - r) / denom;
+      return 3.618 * evi - 0.118;
+    }
+    case 'LAI_SAVI': {
+      const denomSav = nir + r + 0.5; if (denomSav === 0) return NaN;
+      const savi = 1.5 * (nir - r) / denomSav;
+      return 3.62 * savi + 0.23;
+    }
+    case 'LAI_NDRE': {
+      const s = nir + re; if (s === 0) return NaN;
+      const ndre = (nir - re) / s;
+      return 6.41 * ndre + 0.72;
+    }
+    case 'ARVI': {
+      const denom = nir + 2 * r + b; if (denom === 0) return NaN;
+      return (nir - 2 * r + b) / denom;
+    }
+    case 'ENDVI': {
+      const denom = (nir + g) + 2 * b; if (denom === 0) return NaN;
+      return ((nir + g) - 2 * b) / denom;
+    }
+    case 'MSR': {
+      if (r === 0) return NaN;
+      const ratio = nir / r;
+      return (ratio - 1) / (Math.sqrt(ratio) + 1);
+    }
+    case 'RDVI': {
+      const root = Math.sqrt(nir + r); if (root === 0) return NaN;
+      return (nir - r) / root;
+    }
+    case 'TDVI': {
+      const root = Math.sqrt(nir * nir + r + 0.5); if (root === 0) return NaN;
+      return 1.5 * ((nir - r) / root);
+    }
+    case 'BAI': {
+      const dr = 0.1 - r, dn = 0.06 - nir;
+      const denom = dr * dr + dn * dn; if (denom === 0) return NaN;
+      return 1.0 / denom;
+    }
+
+    // ── RGB-based indices ──
+    case 'NGRDI': {
+      const s = g + r; if (s === 0) return NaN;
+      return (g - r) / s;
+    }
+    case 'VARI': {
+      const denom = g + r - b; if (denom === 0) return NaN;
+      return (g - r) / denom;
+    }
+    case 'TGI': {
+      return g - 0.39 * r - 0.61 * b;
+    }
+    case 'MPRI': {
+      const s = g + r; if (s === 0) return NaN;
+      return (g - r) / s;
+    }
+    case 'EXG': {
+      return 2 * g - r - b;
+    }
+    case 'GLI': {
+      const denom = 2 * g + r + b; if (denom === 0) return NaN;
+      return (2 * g - r - b) / denom;
+    }
+    case 'vNDVI': {
+      if (r <= 0 || g <= 0 || b <= 0) return NaN;
+      return 0.5268 * Math.pow(r, -0.1294) * Math.pow(g, 0.3389) * Math.pow(b, -0.3118);
+    }
+    case 'NDYI': {
+      const s = g + b; if (s === 0) return NaN;
+      return (g - b) / s;
+    }
+    default:
+      console.warn('[computeVI] Onbekende index:', vi);
+      return NaN;
+  }
+}
 
 /**
  * Maps a VI value to a CSS rgba() colour using a 9-stop diverging
@@ -161,21 +301,23 @@ export function displayNDVI() {
     ctx.putImageData(imgData, 0, 0);
     state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
     ndviOverlay.addLayer(state.ndviLayer);
+    addContourToOverlay(ndviOverlay);
     legend.addTo(map);
     showLegendInPanel();
     return;
   }
 
   const isP  = state.isPreCalc;
-  const bR   = state.bandRed, bG = state.bandGreen, bN = state.bandNIR, bRE = state.bandRedEdge;
+  const bR   = state.bandRed, bG = state.bandGreen, bB = state.bandBlue, bN = state.bandNIR, bRE = state.bandRedEdge;
   const vi   = state.selectedVI || 'NDVI';
+  const def  = VEGETATION_INDICES.find(v => v.id === vi);
   const noData = gr.noDataValue;
   const isFloat = state.bandMetas.length > 0 && state.bandMetas[0].sampleFormat === 3;
   const noDataEps = (isFloat && noData !== null) ? 1e-6 : 0;
   function nd(v) { return v === null || isNaN(v) || (noData !== null && (noDataEps > 0 ? Math.abs(v - noData) < noDataEps : v === noData)); }
   const stretch = stretchCheck && stretchCheck.checked;
-  const maxBandIdx = Math.max(bR || 0, bG || 0, bN || 0, bRE || 0);
-  const hasAlpha = gr.numberOfRasters >= 2 && state.bandMetas.length > 0 && (gr.numberOfRasters > maxBandIdx + 1);
+  const maxBandIdx = Math.max(bR >= 0 ? bR : -1, bG >= 0 ? bG : -1, bB >= 0 ? bB : -1, bN >= 0 ? bN : -1, bRE >= 0 ? bRE : -1);
+  const hasAlpha = maxBandIdx >= 0 && gr.numberOfRasters >= 2 && state.bandMetas.length > 0 && (gr.numberOfRasters > maxBandIdx + 1);
   const alphaBand = hasAlpha ? gr.numberOfRasters - 1 : -1;
 
   const canvas = document.createElement('canvas');
@@ -196,15 +338,24 @@ export function displayNDVI() {
         if (nd(v)) continue;
         ndvi = v;
       } else {
-        const b1v = gr.values[bN][row][col];
-        const b2v = vi === 'GNDVI' ? gr.values[bG][row][col] : vi === 'NDRE' ? gr.values[bRE][row][col] : gr.values[bR][row][col];
-        if (nd(b1v) || nd(b2v)) continue;
-        const s = b1v + b2v;
-        if (s === 0) continue;
-        if (vi === 'SAVI') ndvi = 1.5 * (b1v - b2v) / (b1v + b2v + 0.5);
-        else if (vi === 'OSAVI') ndvi = (b1v - b2v) / (b1v + b2v + 0.16);
-        else ndvi = (b1v - b2v) / s;
-        if (ndvi < -1 || ndvi > 1) continue;
+        // Extract band values needed for this index
+        const nirVal = def && def.needsNIR && bN >= 0 ? gr.values[bN][row][col] : NaN;
+        const redVal = def && def.needsRed && bR >= 0 ? gr.values[bR][row][col] : NaN;
+        const grnVal = def && def.needsGreen && bG >= 0 ? gr.values[bG][row][col] : NaN;
+        const bluVal = def && def.needsBlue && bB >= 0 ? gr.values[bB][row][col] : NaN;
+        const redgVal = def && def.needsRedEdge && bRE >= 0 ? gr.values[bRE][row][col] : NaN;
+        // Check no-data for each used band
+        if ((def && def.needsNIR && nd(nirVal)) ||
+            (def && def.needsRed && nd(redVal)) ||
+            (def && def.needsGreen && nd(grnVal)) ||
+            (def && def.needsBlue && nd(bluVal)) ||
+            (def && def.needsRedEdge && nd(redgVal))) continue;
+        ndvi = computeVI(vi, nirVal, redVal, grnVal, bluVal, redgVal);
+        if (isNaN(ndvi)) continue;
+        // Clamp to [-1, 1] for normalized indices, skip extreme outliers for others
+        if (def && def.clampRange) {
+          if (ndvi < -1 || ndvi > 1) continue;
+        }
       }
       ndviGrid[row * gr.width + col] = ndvi;
       if (ndvi < ndviMin) ndviMin = ndvi;
@@ -264,7 +415,15 @@ export function displayNDVI() {
     const statsEl = document.querySelector('#info-ndvi-range');
     if (statsEl) statsEl.textContent = ndviMin.toFixed(3) + ' \u2013 ' + ndviMax.toFixed(3);
     const statsRow = document.querySelector('#ndvi-stats-row');
-    if (statsRow) statsRow.classList.remove('hidden');
+    if (statsRow) {
+      statsRow.classList.remove('hidden');
+      // Update label to reflect current index
+      const lbl = document.getElementById('vi-range-label');
+      if (lbl) {
+        const viDef = VEGETATION_INDICES.find(v => v.id === state.selectedVI);
+        lbl.textContent = (viDef ? viDef.label : (state.selectedVI || 'NDVI')) + ' bereik:';
+      }
+    }
   } else {
     console.warn('[NDVI] Geen geldige pixels! noData=' + noData + ' bR=' + bR + ' bN=' + bN);
     toast(t('toastNoValidPixels'), true);
@@ -272,6 +431,7 @@ export function displayNDVI() {
 
   state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
   ndviOverlay.addLayer(state.ndviLayer);
+  addContourToOverlay(ndviOverlay);
   legend.addTo(map);
   showLegendInPanel();
   setTimeout(() => { if (ndviCount > 0) setLegendLabels(scaleMin, scaleMax); }, 50);
@@ -280,6 +440,180 @@ export function displayNDVI() {
 /** Fits the map viewport to the bounds of the loaded GeoTIFF. */
 export function zoomToGeoTIFF() {
   map.fitBounds(getGeoBounds(), { padding: [30, 30] });
+}
+
+// ==========================================
+// ALPHA CONTOUR TRACING
+// ==========================================
+
+/**
+ * Traces the alpha‑mask of the loaded raster to find the actual image
+ * boundary — not just a rectangular bounding box.
+ *
+ * Uses Moore‑Neighbor contour tracing on a binary mask derived from
+ * the alpha band at a reduced resolution (stride ~8) for performance.
+ *
+ * @param {object} gr - state.georaster
+ * @param {number} alphaBandIdx - index of the alpha band in gr.values[]
+ * @returns {[number,number][]|null} Array of [lat, lng] Leaflet coords
+ */
+function traceAlphaContour(gr, alphaBandIdx) {
+  const w = gr.width, h = gr.height;
+  // Adaptive stride: aim for ~2000px total contour resolution
+  const stride = Math.max(2, Math.floor(Math.sqrt((w * h) / 100000)));
+  const sw = Math.ceil(w / stride), sh = Math.ceil(h / stride);
+
+  // ── 1. Build binary mask from alpha band ──
+  const mask = new Uint8Array(sw * sh);
+  const avals = gr.values[alphaBandIdx];
+  for (let y = 0; y < h; y += stride) {
+    const my = Math.floor(y / stride);
+    for (let x = 0; x < w; x += stride) {
+      const mx = Math.floor(x / stride);
+      const va = avals[y][x];
+      mask[my * sw + mx] = (va != null && !isNaN(va) && va > 0) ? 1 : 0;
+    }
+  }
+
+  // ── 2. Find starting boundary pixel (topmost, leftmost valid pixel) ──
+  let startX = -1, startY = -1;
+  for (let y = 0; y < sh && startY < 0; y++) {
+    for (let x = 0; x < sw; x++) {
+      if (mask[y * sw + x]) {
+        startX = x; startY = y;
+        break;
+      }
+    }
+  }
+  if (startX < 0) return null;
+
+  // ── 3. Moore‑Neighbor tracing ──
+  // 8-neighbour offsets in clockwise order: E, SE, S, SW, W, NW, N, NE
+  const ndx = [1,1,0,-1,-1,-1,0,1];
+  const ndy = [0,1,1,1,0,-1,-1,-1];
+
+  const pixels = [];
+  let cx = startX, cy = startY;
+  let dir = 5; // start search direction (NW, since start pixel has nothing above/left)
+  let iter = 0;
+  const maxIter = sw * sh * 2;
+
+  do {
+    pixels.push([cx * stride, cy * stride]);
+    let found = false;
+    for (let i = 0; i < 8; i++) {
+      const nd = (dir + 1 + i) % 8;
+      const nx = cx + ndx[nd];
+      const ny = cy + ndy[nd];
+      if (nx >= 0 && nx < sw && ny >= 0 && ny < sh && mask[ny * sw + nx]) {
+        cx = nx; cy = ny;
+        dir = (nd + 4) % 8; // turn 180° so next search starts from opposite side
+        found = true;
+        break;
+      }
+    }
+    if (!found) break; // stuck — contour is not closed
+    iter++;
+  } while ((cx !== startX || cy !== startY) && iter < maxIter);
+
+  if (pixels.length < 4) return null;
+
+  // ── 4. Simplify: keep only ~500 points max ──
+  let simplified = pixels;
+  if (pixels.length > 500) {
+    const step = Math.ceil(pixels.length / 500);
+    simplified = [];
+    for (let i = 0; i < pixels.length; i += step) simplified.push(pixels[i]);
+    // Ensure start/end match
+    if (simplified.length > 1 && (simplified[0][0] !== simplified[simplified.length-1][0] ||
+        simplified[0][1] !== simplified[simplified.length-1][1])) {
+      simplified.push([simplified[0][0], simplified[0][1]]);
+    }
+  }
+
+  // ── 5. Convert pixel coords to geographic coords ──
+  const epsg = state.geotiffEPSG;
+  const bounds = getGeoBounds();
+  // Use the same projection as getGeoBounds()
+  return simplified.map(function (p) {
+    let lon = gr.xmin + p[0] * gr.pixelWidth;
+    let lat = gr.ymax - p[1] * Math.abs(gr.pixelHeight);
+    if (epsg && epsg !== 'EPSG:4326') {
+      try {
+        const pp = proj4(epsg, 'EPSG:4326', [lon, lat]);
+        return [pp[1], pp[0]];
+      } catch (_) { /* fall through */ }
+    }
+    return [lat, lon];
+  });
+}
+
+/**
+ * Adds the alpha-contour (gestreepte magenta lijn) to a given Leaflet
+ * LayerGroup.  Uses the alpha band to trace the real image edge, or falls
+ * back to a bounding‑box rectangle.
+ * @param {L.LayerGroup} overlay
+ */
+export function addContourToOverlay(overlay) {
+  // Verwijder oude contour eerst (herkenbaar aan className)
+  overlay.eachLayer(function (l) {
+    if (l._isContour) overlay.removeLayer(l);
+  });
+
+  const gr = state.georaster;
+  if (!gr) return;
+  const nAlpha = state.numAlphaBands || 0;
+  const alphaBand = nAlpha > 0 ? gr.numberOfRasters - nAlpha : -1;
+
+  let points = null;
+  if (alphaBand >= 0) {
+    try {
+      points = traceAlphaContour(gr, alphaBand);
+    } catch (e) { console.warn('[Contour] trace failed:', e); }
+  }
+
+  if (points && points.length >= 4) {
+    const poly = L.polygon(points, {
+      color: '#FF66AA', weight: 3, dashArray: '8,6',
+      fill: false, interactive: false, opacity: 0.85,
+    });
+    poly._isContour = true;
+    overlay.addLayer(poly);
+  } else {
+    // Fallback bounding box
+    const rect = L.rectangle(getGeoBounds(), {
+      color: '#FF66AA', weight: 3, dashArray: '8,6',
+      fill: false, interactive: false, opacity: 0.85,
+    });
+    rect._isContour = true;
+    overlay.addLayer(rect);
+  }
+}
+
+/**
+ * Renders a normal RGB colour preview of the loaded GeoTIFF.
+ *
+ * Uses the first three raster bands as Red, Green, Blue — this matches the
+ * vast majority of orthophoto GeoTIFFs (including WebODM output) where bands
+ * are already stored in natural‑colour order.  For multispectral files the
+ * colours will be off; the user is expected to configure the correct band
+ * mapping in step 3 before computing a vegetation index.
+ *
+ * Stretch: **luminance‑based mean ± 2σ** auto‑contrast.  For each subsampled
+ * pixel the luminance L = (R+G+B)/3 is computed.  The mean and σ of the
+ * luminance distribution are then used to derive a *single* stretch range
+ * [mean−2σ, mean+2σ] applied identically to all three bands.
+ *
+ * This is the key to correct colour: because all channels share the same
+ * stretch range, the per‑pixel ratios between R, G and B are preserved.
+ * Using luminance (instead of raw combined values) naturally rejects
+ * band‑specific outliers so the image stays bright and natural.
+ *
+ * The TIFF alpha channel is respected where present.
+ */
+export function displayRGB() {
+  ndviOverlay.clearLayers();
+  addContourToOverlay(ndviOverlay);
 }
 
 // ==========================================
@@ -483,6 +817,7 @@ export function clipNDVIToParcel(parcels) {
   ndviOverlay.clearLayers();
   state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
   ndviOverlay.addLayer(state.ndviLayer);
+  addContourToOverlay(ndviOverlay);
 
   setTimeout(() => setLegendLabels(scaleMin, scaleMax), 50);
   drawNDVIHistogram();
@@ -540,6 +875,28 @@ function _histogramToValues(maxSamples) {
   }
   console.log('[HistToValues] total=' + total + ' samples=' + values.length + ' step=' + step);
   return { sorted: values.sort((a, b) => a - b), data };
+}
+
+/**
+ * Deduplicates adjacent boundaries and pads/trims to exactly numCls + 1
+ * entries.  Used by several classification methods.
+ * @param {number[]} bounds - Raw class boundaries (may have adjacent dupes).
+ * @param {number}   min    - Global minimum to use as first boundary.
+ * @param {number}   max    - Global maximum to use as last boundary.
+ * @param {number}   numCls - Desired number of classes.
+ * @returns {number[]} Normalised boundary array of length numCls + 1.
+ */
+function _normalizeBounds(bounds, min, max, numCls) {
+  const deduped = [bounds[0]];
+  for (let i = 1; i < bounds.length; i++) {
+    if (bounds[i] > deduped[deduped.length - 1] + 1e-6) deduped.push(bounds[i]);
+  }
+  const result = [min];
+  for (let i = 1; i < numCls; i++) {
+    result.push(deduped[i] !== undefined ? deduped[i] : max);
+  }
+  result.push(max);
+  return result;
 }
 
 /**
@@ -737,18 +1094,7 @@ function stdDevClassify() {
   }
   bounds.push(data.max);
 
-  // Deduplicate adjacent identical values
-  const unique = [bounds[0]];
-  for (let i = 1; i < bounds.length; i++) {
-    if (bounds[i] > unique[unique.length - 1] + 1e-6) unique.push(bounds[i]);
-  }
-  // Pad or trim to exactly k + 1 boundaries
-  const finalBounds = [data.min];
-  for (let i = 1; i < numCls; i++) {
-    finalBounds.push(unique[i] !== undefined ? unique[i] : data.max);
-  }
-  finalBounds.push(data.max);
-  _applyBreaks(finalBounds, 'std-dev');
+  _applyBreaks(_normalizeBounds(bounds, data.min, data.max, numCls), 'std-dev');
 }
 
 // ── Geometric Interval ────────────────────────────────────────────
@@ -787,17 +1133,7 @@ function geometricIntervalClassify() {
   }
   bounds.push(data.max);
 
-  // Deduplicate
-  const unique = [bounds[0]];
-  for (let i = 1; i < bounds.length; i++) {
-    if (bounds[i] > unique[unique.length - 1] + 1e-6) unique.push(bounds[i]);
-  }
-  const finalBounds = [data.min];
-  for (let i = 1; i < numCls; i++) {
-    finalBounds.push(unique[i] !== undefined ? unique[i] : data.max);
-  }
-  finalBounds.push(data.max);
-  _applyBreaks(finalBounds, 'geometric');
+  _applyBreaks(_normalizeBounds(bounds, data.min, data.max, numCls), 'geometric');
 }
 
 // ── Pretty Breaks ─────────────────────────────────────────────────
@@ -843,17 +1179,7 @@ function prettyBreaksClassify() {
   }
   bounds.push(hi);
 
-  // Deduplicate
-  const unique = [bounds[0]];
-  for (let i = 1; i < bounds.length; i++) {
-    if (bounds[i] > unique[unique.length - 1] + 1e-6) unique.push(bounds[i]);
-  }
-  const finalBounds = [lo];
-  for (let i = 1; i < numCls; i++) {
-    finalBounds.push(unique[i] !== undefined ? unique[i] : hi);
-  }
-  finalBounds.push(hi);
-  _applyBreaks(finalBounds, 'pretty');
+  _applyBreaks(_normalizeBounds(bounds, lo, hi, numCls), 'pretty');
 }
 
 // ==========================================
@@ -932,4 +1258,5 @@ export function renderClassifiedNDVI() {
   ndviOverlay.clearLayers();
   state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
   ndviOverlay.addLayer(state.ndviLayer);
+  addContourToOverlay(ndviOverlay);
 }

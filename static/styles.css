@@ -137,12 +137,15 @@ body {
   min-height: 0;
   overflow-y: auto;
   padding: 8px 0;
-  /* Hide scrollbar track on all browsers — still scrollable */
-  scrollbar-width: none;          /* Firefox */
-  -ms-overflow-style: none;       /* IE 11 */
 }
+
 .sidebar-steps::-webkit-scrollbar {
-  display: none;                  /* Chrome / Edge / Safari */
+  width: 5px;
+}
+
+.sidebar-steps::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
 }
 
 /* ---------- Steps ---------- */
@@ -468,12 +471,20 @@ input[type="range"]::-moz-range-thumb {
   -webkit-tap-highlight-color: transparent;
 }
 
+.btn:active {
+  transform: scale(.98);
+}
+
+.btn:disabled {
+  transform: none;
+}
+
 .btn-primary {
   background: var(--primary);
   color: white;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: var(--primary-dark);
 }
 
@@ -544,7 +555,7 @@ input[type="range"]::-moz-range-thumb {
 
 .class-row {
   display: grid;
-  grid-template-columns: 24px 1fr 54px 54px 60px 28px;
+  grid-template-columns: 24px 1fr 54px 54px 28px;
   gap: 6px;
   align-items: center;
   padding: 6px 0;
@@ -592,7 +603,7 @@ input[type="range"]::-moz-range-thumb {
 
 .class-labels {
   display: grid;
-  grid-template-columns: 24px 1fr 54px 54px 60px 28px;
+  grid-template-columns: 24px 1fr 54px 54px 28px;
   gap: 6px;
   font-size: 10px;
   font-weight: 600;
@@ -601,6 +612,67 @@ input[type="range"]::-moz-range-thumb {
   letter-spacing: .3px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
+}
+
+/* ---------- Dosage Editor (Step 5) ---------- */
+.dosage-row {
+  display: grid;
+  grid-template-columns: 20px 1fr 95px 85px;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+.dosage-row:last-child {
+  border-bottom: none;
+}
+.dosage-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.dosage-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dosage-ndvi-range {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.dosage-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.dosage-input-wrap input[type="number"] {
+  width: 100%;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-family: inherit;
+  background: white;
+  color: var(--text);
+  text-align: right;
+}
+.dosage-input-wrap input[type="number"]:focus {
+  outline: none;
+  border-color: var(--primary-light);
+  box-shadow: 0 0 0 3px rgba(76,175,80,.15);
+}
+.dosage-unit-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 30px;
 }
 
 /* ---------- Export Stats ---------- */
@@ -684,20 +756,20 @@ input[type="range"]::-moz-range-thumb {
 
 /* ---------- Toast ---------- */
 .toast {
-  position: absolute;
+  position: fixed;
   bottom: 24px;
   left: 50%;
-  transform: translateX(-50%) translateY(20px);
-  background: var(--text);
+  transform: translateX(-50%) translateY(8px);
+  background: #1a1a1a;
   color: white;
   padding: 10px 20px;
-  border-radius: var(--radius);
+  border-radius: 99px;
   font-size: 13px;
   font-weight: 500;
   box-shadow: var(--shadow-lg);
   z-index: 1200;
   opacity: 0;
-  transition: all .3s ease;
+  transition: opacity .25s ease, transform .25s ease;
   pointer-events: none;
   white-space: nowrap;
 }
@@ -741,6 +813,77 @@ input[type="range"]::-moz-range-thumb {
   font-weight: 600;
   color: var(--text-secondary);
   letter-spacing: 0.2px;
+}
+
+/* ---------- WMS legend helpers ---------- */
+.wms-legend-empty {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 2px 0;
+}
+
+/* AHN elevation bar legend */
+#ahn-legend-section .ulc-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+#ahn-legend-info {
+  margin: 4px 0 2px;
+}
+.ahn-legend-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ahn-legend-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 36px;
+}
+.ahn-legend-label:first-child { text-align: left; }
+.ahn-legend-label:last-child  { text-align: right; }
+.ahn-legend-gradient {
+  flex: 1;
+  height: 10px;
+  border-radius: 3px;
+  background: linear-gradient(to right, #2c7bb6, #abd9e9, #ffffbf, #fdae61, #d7191c);
+  border: 1px solid var(--border);
+}
+
+/* Bodem legend items with colour swatches */
+#bodem-legend-section .ulc-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+#bodem-legend-items {
+  margin: 4px 0 2px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.bodem-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 0;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.bodem-legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid rgba(0,0,0,0.2);
+  flex-shrink: 0;
+}
+.bodem-legend-name {
+  color: var(--text-secondary);
+  word-break: break-word;
 }
 
 /* ---------- NDVI legend — parcel crop section ---------- */
@@ -913,6 +1056,11 @@ input[type="range"]::-moz-range-thumb {
 .hidden { display: none !important; }
 
 /* ---------- Leaflet overrides ---------- */
+/* Remove browser focus outline on SVG paths (parcel boundaries) */
+.leaflet-interactive:focus {
+  outline: none;
+}
+
 .leaflet-control-layers {
   border-radius: var(--radius-sm) !important;
   box-shadow: var(--shadow) !important;
@@ -1224,6 +1372,13 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 0 3px rgba(46,125,50,.2);
 }
 
+/* ---------- WMS GetFeatureInfo popup ---------- */
+.wms-popup-sep {
+  height: 1px;
+  background: #ddd;
+  margin: 4px 0;
+}
+
 .step-progress-item.completed .step-progress-dot {
   background: var(--primary-light);
   color: white;
@@ -1407,4 +1562,44 @@ input[type="range"]::-moz-range-thumb {
 .step-summary strong {
   color: var(--text-secondary);
   font-weight: 600;
+}
+
+/* ---------- VI Formula Info Panel ---------- */
+.vi-info {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.vi-formula {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  background: rgba(76,175,80,.08);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.vi-desc {
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.vi-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vi-details span {
+  white-space: nowrap;
 }

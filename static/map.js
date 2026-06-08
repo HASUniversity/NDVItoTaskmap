@@ -21,8 +21,8 @@
                        — legend update helpers called by ndvi.js / brp.js
    =================================================== */
 
-import { state } from './state.js';
-import { escapeHtml } from './utils.js';
+import { state, VEGETATION_INDICES } from './state.js?v=1';
+import { escapeHtml } from './utils.js?v=1';
 
 const { t } = window;
 
@@ -41,6 +41,9 @@ proj4.defs('EPSG:32632', '+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs');
 export const map = L.map('map', { center: [52.1, 5.5], zoom: 8, zoomControl: false });
 L.control.zoom({ position: 'topright' }).addTo(map);
 
+const AHN_WMS_BASE = 'https://service.pdok.nl/rws/actueel-hoogtebestand-nederland/wms/v1_0';
+const BODEM_WMS_BASE = 'https://service.pdok.nl/tno/bro-bodemkaart/wms/v1_0';
+
 export const basemaps = {
   'PDOK Luchtfoto': L.tileLayer(
     'https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
@@ -54,6 +57,18 @@ export const basemaps = {
     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     { attribution: '&copy; OpenStreetMap', maxZoom: 19 }
   ),
+  'AHN DTM': L.tileLayer.wms(AHN_WMS_BASE, {
+    layers: 'dtm_05m', format: 'image/png', transparent: false, version: '1.1.1',
+    attribution: 'PDOK / AHN', maxZoom: 19
+  }),
+  'AHN DSM': L.tileLayer.wms(AHN_WMS_BASE, {
+    layers: 'dsm_05m', format: 'image/png', transparent: false, version: '1.1.1',
+    attribution: 'PDOK / AHN', maxZoom: 19
+  }),
+  'BRO Bodemkaart': L.tileLayer.wms(BODEM_WMS_BASE, {
+    layers: 'soilarea', format: 'image/png', transparent: false, version: '1.3.0',
+    attribution: 'PDOK / BRO', maxZoom: 19
+  }),
 };
 basemaps['Esri Satelliet'].addTo(map);
 
@@ -75,46 +90,225 @@ basemaps['Esri Satelliet'].addTo(map);
 })();
 
 // ==========================================
-// AHN4 HOOGTE (per-parcel WMS overlay)
+// AHN — legend (viewport-based elevation range)
 // ==========================================
-const AHN_WMS_BASE = 'https://service.pdok.nl/rws/actueel-hoogtebestand-nederland/wms/v1_0';
-let _ahnMode = 'off';  // 'off' | 'dtm' | 'dsm'
 
-export function getAhnMode() { return _ahnMode; }
-export function setAhnMode(mode) { _ahnMode = mode; refreshAhnOverlay(); }
+function fetchAhnLegend() {
+  var bounds = map.getBounds();
+  var sw = bounds.getSouthWest();
+  var ne = bounds.getNorthEast();
+  var size = map.getSize();
+  var pt3857_sw = proj4('EPSG:4326', 'EPSG:3857', [sw.lng, sw.lat]);
+  var pt3857_ne = proj4('EPSG:4326', 'EPSG:3857', [ne.lng, ne.lat]);
+  var bbox = pt3857_sw[0] + ',' + pt3857_sw[1] + ',' + pt3857_ne[0] + ',' + pt3857_ne[1];
+  var w = Math.round(size.x);
+  var h = Math.round(size.y);
+  var layerName = _activeBasemap === 'AHN DTM' ? 'dtm_05m' : 'dsm_05m';
 
-/**
- * Creates a bounds-restricted WMS tile layer for AHN around the
- * selected parcels only.  Tiles outside the selection are never fetched.
- */
-export function refreshAhnOverlay() {
-  ahnOverlay.clearLayers();
-  if (_ahnMode === 'off') return;
-  const parcels = state.selectedParcels;
-  if (!parcels || parcels.length === 0) return;
+  // Sample 9 points (3×3 grid) for elevation values
+  var elevValues = [];
+  var pts = [];
+  for (var r = 0; r < 3; r++) {
+    for (var c = 0; c < 3; c++) {
+      pts.push({
+        lat: sw.lat + (ne.lat - sw.lat) * (r + 0.5) / 3,
+        lng: sw.lng + (ne.lng - sw.lng) * (c + 0.5) / 3
+      });
+    }
+  }
+  Promise.all(pts.map(function (pt) {
+    var cpt = map.latLngToContainerPoint(L.latLng(pt.lat, pt.lng));
+    var url = AHN_WMS_BASE + '?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetFeatureInfo' +
+      '&LAYERS=' + layerName + '&QUERY_LAYERS=' + layerName +
+      '&SRS=EPSG:3857&BBOX=' + bbox +
+      '&WIDTH=' + w + '&HEIGHT=' + h +
+      '&X=' + Math.round(cpt.x) + '&Y=' + Math.round(cpt.y) +
+      '&INFO_FORMAT=application/json&FEATURE_COUNT=1';
+    return fetch(url).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.features && d.features[0] && d.features[0].properties) {
+        // AHN WMS returns the elevation in 'value_list' property
+        var props = d.features[0].properties;
+        var elev = props['value_list'] || props['GRAY_INDEX'] || props['elevation'];
+        if (elev !== null && elev !== undefined) elevValues.push(Number(elev));
+      }
+    }).catch(function () {});
+  })).then(function () {
+    renderAhnLegend(elevValues);
+  });
+}
 
-  const layerName = _ahnMode === 'dtm' ? 'dtm_05m' : 'dsm_05m';
-  const fc = { type: 'FeatureCollection', features: parcels };
-  const combinedBounds = L.geoJSON(fc).getBounds().pad(0.05); // 5% padding
-
-  L.tileLayer.wms(AHN_WMS_BASE, {
-    layers: layerName,
-    format: 'image/png',
-    transparent: true,
-    attribution: 'AHN4 &copy; RWS / PDOK',
-    maxZoom: 19,
-    opacity: 0.65,
-    bounds: combinedBounds,
-  }).addTo(ahnOverlay);
+function renderAhnLegend(values) {
+  var el = document.getElementById('ahn-legend-info');
+  if (!el) return;
+  if (values.length === 0) {
+    el.innerHTML = '<div class="wms-legend-empty">Geen hoogtegegevens in beeld</div>';
+    el.style.display = '';
+    return;
+  }
+  var min = Math.min.apply(null, values).toFixed(0);
+  var max = Math.max.apply(null, values).toFixed(0);
+  el.innerHTML =
+    '<div class="ahn-legend-bar">' +
+      '<span class="ahn-legend-label">' + min + ' m</span>' +
+      '<span class="ahn-legend-gradient"></span>' +
+      '<span class="ahn-legend-label">' + max + ' m</span>' +
+    '</div>';
+  el.style.display = '';
 }
 
 // ==========================================
+// BRO BODEMKAART — legend (viewport-based)
+// ==========================================
+
+/**
+ * Samples the viewport via GetFeatureInfo, collecting unique
+ * normal_soilprofile_name values and their representative colours.
+ */
+function fetchBodemLegend() {
+  var bounds = map.getBounds();
+  var sw = bounds.getSouthWest();
+  var ne = bounds.getNorthEast();
+  var size = map.getSize();
+  var pt3857_sw = proj4('EPSG:4326', 'EPSG:3857', [sw.lng, sw.lat]);
+  var pt3857_ne = proj4('EPSG:4326', 'EPSG:3857', [ne.lng, ne.lat]);
+  var bbox = pt3857_sw[0] + ',' + pt3857_sw[1] + ',' + pt3857_ne[0] + ',' + pt3857_ne[1];
+  var w = Math.round(size.x);
+  var h = Math.round(size.y);
+
+  // 5×5 grid = 25 sample points
+  var pts = [];
+  for (var r = 0; r < 5; r++) {
+    for (var c = 0; c < 5; c++) {
+      pts.push({
+        lat: sw.lat + (ne.lat - sw.lat) * (r + 0.5) / 5,
+        lng: sw.lng + (ne.lng - sw.lng) * (c + 0.5) / 5
+      });
+    }
+  }
+
+  var seenCodes = {};
+  var results = [];
+
+  Promise.all(pts.map(function (pt) {
+    var cpt = map.latLngToContainerPoint(L.latLng(pt.lat, pt.lng));
+    var url = BODEM_WMS_BASE + '?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo' +
+      '&LAYERS=soilarea&QUERY_LAYERS=soilarea' +
+      '&CRS=EPSG:3857&BBOX=' + bbox +
+      '&WIDTH=' + w + '&HEIGHT=' + h +
+      '&I=' + Math.round(cpt.x) + '&J=' + Math.round(cpt.y) +
+      '&INFO_FORMAT=application/json&FEATURE_COUNT=1';
+    return fetch(url)
+      .then(function (r) { if (!r.ok) return null; return r.json(); })
+      .then(function (data) {
+        if (!data || !data.features || !data.features[0]) return;
+        var props = data.features[0].properties || {};
+        var code = props.normal_soilprofile_code || '';
+        var name = props.normal_soilprofile_name || code || 'Onbekend';
+        if (!code || seenCodes[code]) return;
+        seenCodes[code] = true;
+        results.push({ code: code, name: name, latlng: L.latLng(pt.lat, pt.lng) });
+      })
+      .catch(function () {});
+  })).then(function () {
+    return Promise.all(results.map(function (item) {
+      return sampleBodemColor(item.latlng).then(function (color) {
+        item.color = color || '#ccc';
+      });
+    }));
+  }).then(function () {
+    renderBodemLegend(results);
+  });
+}
+
+function sampleBodemColor(latlng) {
+  var pt3857 = proj4('EPSG:4326', 'EPSG:3857', [latlng.lng, latlng.lat]);
+  var half = 100; // 200×200 m area for a reliable sample
+  var bbox = (pt3857[0] - half) + ',' + (pt3857[1] - half) + ',' +
+             (pt3857[0] + half) + ',' + (pt3857[1] + half);
+  var url = BODEM_WMS_BASE + '?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+    '&LAYERS=soilarea&FORMAT=image/png&TRANSPARENT=false' +
+    '&CRS=EPSG:3857&STYLES=&WIDTH=10&HEIGHT=10&BBOX=' + bbox;
+  return fetch(url)
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob(); })
+    .then(function (blob) {
+      return new Promise(function (resolve) {
+        var img = new Image();
+        img.onload = function () {
+          var canvas = document.createElement('canvas');
+          canvas.width = 10; canvas.height = 10;
+          var ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          var data = ctx.getImageData(0, 0, 10, 10).data;
+          // Find the most common non-white colour among non-transparent pixels
+          var colorCounts = {};
+          var bestColor = '#ccc';
+          var bestCount = 0;
+          for (var i = 0; i < data.length; i += 4) {
+            if (data[i+3] < 128) continue; // skip transparent
+            var r = data[i], g = data[i+1], b = data[i+2];
+            if (r > 250 && g > 250 && b > 250) continue; // skip white
+            var key = r + ',' + g + ',' + b;
+            colorCounts[key] = (colorCounts[key] || 0) + 1;
+            if (colorCounts[key] > bestCount) {
+              bestCount = colorCounts[key];
+              bestColor = 'rgb(' + r + ',' + g + ',' + b + ')';
+            }
+          }
+          resolve(bestColor);
+        };
+        img.onerror = function () { resolve('#ccc'); };
+        img.src = URL.createObjectURL(blob);
+      });
+    })
+    .catch(function () { return '#ccc'; });
+}
+
+function renderBodemLegend(entries) {
+  var el = document.getElementById('bodem-legend-items');
+  if (!el) return;
+  if (entries.length === 0) {
+    el.innerHTML = '<div class="wms-legend-empty">Geen bodemdata in beeld</div>';
+    el.style.display = '';
+    return;
+  }
+  var html = '';
+  entries.sort(function (a, b) { return a.name.localeCompare(b.name); });
+  entries.forEach(function (item) {
+    html += '<div class="bodem-legend-item">' +
+      '<span class="bodem-legend-swatch" style="background:' + item.color + '"></span>' +
+      '<span class="bodem-legend-name">' + item.name + '</span>' +
+    '</div>';
+  });
+  el.innerHTML = html;
+  el.style.display = '';
+}
+
+function clearBodemLegend() {
+  var el = document.getElementById('bodem-legend-items');
+  if (el) { el.style.display = 'none'; }
+}
+
+// Re-fetch legends when map view changes
+var _legendRefreshTimer = null;
+map.on('moveend', function () {
+  if (_legendRefreshTimer) clearTimeout(_legendRefreshTimer);
+  _legendRefreshTimer = setTimeout(function () {
+    if (_activeBasemap === 'AHN DTM' || _activeBasemap === 'AHN DSM') fetchAhnLegend();
+    if (_activeBasemap === 'BRO Bodemkaart') fetchBodemLegend();
+  }, 600);
+});
+
+// ==========================================
+// WMS GETFEATUREINFO — click to identify
+// ==========================================
+// ==========================================
 // LAYER GROUPS
 // ==========================================
-export const ahnOverlay        = L.layerGroup().addTo(map);
+export const ahnOverlay        = L.layerGroup().addTo(map);   // kept for compat
+export const bodemOverlay      = L.layerGroup().addTo(map);   // kept for compat
 export const ndviOverlay       = L.layerGroup().addTo(map);
-export const selectionOverlay  = L.layerGroup().addTo(map);
 export const brpOverlay        = L.layerGroup().addTo(map);
+export const selectionOverlay  = L.featureGroup().addTo(map);
 export const gridOverlay       = L.layerGroup(); // added to map on first generateTaskMap()
 
 // ==========================================
@@ -205,22 +399,31 @@ const LayerControlClass = L.Control.extend({
       '<label class="ulc-radio"><input type="radio" name="basemap" value="Esri Satelliet" checked> Esri Satelliet</label>' +
       '<label class="ulc-radio"><input type="radio" name="basemap" value="PDOK Luchtfoto"> PDOK Luchtfoto</label>' +
       '<label class="ulc-radio"><input type="radio" name="basemap" value="OpenStreetMap"> OpenStreetMap</label>' +
+      '<label class="ulc-radio"><input type="radio" name="basemap" value="AHN DTM"> AHN DTM</label>' +
+      '<label class="ulc-radio"><input type="radio" name="basemap" value="AHN DSM"> AHN DSM</label>' +
+      '<label class="ulc-radio"><input type="radio" name="basemap" value="BRO Bodemkaart"> BRO Bodemkaart</label>' +
       '<div class="ulc-sep"></div>' +
       '<div class="ulc-section-title" data-i18n="lcLayers">Lagen</div>' +
-      '<label class="ulc-check"><input type="checkbox" data-layer="ndvi" checked> \uD83C\uDF3F NDVI</label>' +
-      '<label class="ulc-check"><input type="checkbox" data-layer="taakkaart"> <span data-i18n="lcTaskmap">\uD83D\uDCCB Taakkaart</span></label>' +
-      '<label class="ulc-check"><input type="checkbox" data-layer="percelen" checked> <span data-i18n="lcParcels">\uD83D\uDFE1 Percelen</span></label>' +
-      '<label class="ulc-check"><input type="checkbox" data-layer="selectie" checked> <span data-i18n="lcSelection">\u2705 Selectie</span></label>' +
-      '<div class="ulc-sep"></div>' +
-      '<div class="ulc-section-title" data-i18n="lcAHN">AHN4 Hoogte</div>' +
-      '<label class="ulc-radio"><input type="radio" name="ahn" value="off" checked> <span data-i18n="lcAhnOff">Uit</span></label>' +
-      '<label class="ulc-radio"><input type="radio" name="ahn" value="dtm"> <span data-i18n="lcAhnDtm">\uD83D\uDDFB DTM (maaiveld)</span></label>' +
-      '<label class="ulc-radio"><input type="radio" name="ahn" value="dsm"> <span data-i18n="lcAhnDsm">\uD83C\uDFD7 DSM (oppervlak)</span></label>' +
-      '<div class="ulc-sep ulc-ndvi-section" style="display:none"></div>' +
+      '<label class="ulc-check" id="ulc-layer-taakkaart" style="display:none"><input type="checkbox" data-layer="taakkaart"> <span data-i18n="lcTaskmap">\uD83D\uDCCB Taakkaart</span></label>' +
+      '<label class="ulc-check" id="ulc-layer-percelen" style="display:none"><input type="checkbox" data-layer="percelen" checked> <span data-i18n="lcParcels">\uD83D\uDFE1 Percelen</span></label>' +
+      '<label class="ulc-check" id="ulc-layer-selectie" style="display:none"><input type="checkbox" data-layer="selectie" checked> <span data-i18n="lcSelection">\u2705 Selectie</span></label>' +
       '<div class="ulc-ndvi-section" style="display:none">' +
-        '<div class="ulc-section-title" id="legend-title">NDVI</div>' +
+        '<div class="ulc-sep"></div>' +
+        '<label class="ulc-check"><input type="checkbox" data-layer="ndvi" checked> \uD83C\uDF3F <span id="vi-checkbox-label">NDVI</span></label>' +
         '<div class="legend-gradient"></div>' +
         '<div class="legend-labels" id="legend-labels"><span>-0.20</span><span>0.40</span><span>1.00</span></div>' +
+      '</div>' +
+      /* AHN legend — visible only when AHN DTM/AHN DSM is active */
+      '<div id="ahn-legend-section" style="display:none">' +
+        '<div class="ulc-sep"></div>' +
+        '<div class="ulc-section-title">AHN Hoogte</div>' +
+        '<div id="ahn-legend-info"></div>' +
+      '</div>' +
+      /* Bodemkaart legend — visible only when BRO Bodemkaart is active */
+      '<div id="bodem-legend-section" style="display:none">' +
+        '<div class="ulc-sep"></div>' +
+        '<div class="ulc-section-title" data-i18n="lcBodemLegend">Bodemtypen in beeld</div>' +
+        '<div id="bodem-legend-items"></div>' +
       '</div>' +
       '<div id="legend-parcel" style="display:none">' +
         '<div class="legend-parcel-sep"></div>' +
@@ -237,14 +440,27 @@ const LayerControlClass = L.Control.extend({
         basemaps[_activeBasemap].remove();
         _activeBasemap = radio.value;
         basemaps[_activeBasemap].addTo(map);
-      });
-    });
-
-    // AHN radio toggle (DTM / DSM / off)
-    panel.querySelectorAll('input[name="ahn"]').forEach(function (radio) {
-      radio.addEventListener('change', function () {
-        if (!radio.checked) return;
-        setAhnMode(radio.value);
+        // Show/hide AHN legend section
+        var ahnSection = document.getElementById('ahn-legend-section');
+        if (ahnSection) {
+          if (_activeBasemap === 'AHN DTM' || _activeBasemap === 'AHN DSM') {
+            ahnSection.style.display = '';
+            fetchAhnLegend();
+          } else {
+            ahnSection.style.display = 'none';
+          }
+        }
+        // Show/hide bodem legend section
+        var bodemSection = document.getElementById('bodem-legend-section');
+        if (bodemSection) {
+          if (_activeBasemap === 'BRO Bodemkaart') {
+            bodemSection.style.display = '';
+            fetchBodemLegend();
+          } else {
+            bodemSection.style.display = 'none';
+            clearBodemLegend();
+          }
+        }
       });
     });
 
@@ -276,6 +492,11 @@ const LayerControlClass = L.Control.extend({
           var selCb = panel.querySelector('input[data-layer="selectie"]');
           if (selCb && selCb.checked !== this.checked) {
             selCb.checked = this.checked;
+            // Re-add selectionOverlay so it stays on top of brpOverlay
+            if (this.checked) {
+              map.addLayer(selectionOverlay);
+              selectionOverlay.bringToFront();
+            }
             if (layerByKey.selectie) {
               if (this.checked) map.addLayer(layerByKey.selectie);
               else map.removeLayer(layerByKey.selectie);
@@ -326,18 +547,66 @@ export function syncMobilePaneToggle() {
 export const legend = { addTo: function () { return this; } };
 
 export function showLegendInPanel() {
-  var title = document.getElementById('legend-title');
-  if (title) title.textContent = state.selectedVI || 'NDVI';
+  // Bepaal de leesbare label voor de geselecteerde index
+  var viDef = VEGETATION_INDICES.find(function (v) { return v.id === state.selectedVI; });
+  var label = viDef ? viDef.label : (state.selectedVI || 'NDVI');
+
+  // ➜ Checkbox-label in het lagenpaneel
+  var cbox = document.getElementById('vi-checkbox-label');
+  if (cbox) cbox.textContent = label;
+
+  // Stap-3 progress label (stappenbalk bovenaan)
+  var badge = document.querySelector('[data-i18n="step3label"]');
+  if (badge) badge.textContent = label;
+
+  // Werk de histogram-titel bij (stap 4)
+  var histTitle = document.getElementById('histogram-title');
+  if (histTitle) histTitle.textContent = label + ' verdeling';
+
+  // Update VI-bereik label in bestand-info paneel
+  var rangeLabel = document.getElementById('vi-range-label');
+  if (rangeLabel) rangeLabel.textContent = label + ' bereik:';
+
   // Sync the gradient to match ndviToRGB exactly (replaces the CSS fallback)
   var gradientCss = generateNdviGradientCss();
   var gradientEls = document.querySelectorAll('.legend-gradient');
   for (var gi = 0; gi < gradientEls.length; gi++) {
     gradientEls[gi].style.background = gradientCss;
   }
-  // Show the NDVI section in ULC panel (both desktop and mobile)
-  document.querySelectorAll('.ulc-ndvi-section').forEach(function (el) {
-    el.style.display = '';
-  });
+
+  // Update layer visibility (toon/verberg lagen op basis van status)
+  updateLayerVisibility();
+}
+
+/**
+ * Toont/verbergt laag-checkboxes in het lagenpaneel op basis van
+ * de applicatiestatus — alleen zichtbaar als de laag daadwerkelijk
+ * gegenereerd of geladen is in de kaart.
+ */
+export function updateLayerVisibility() {
+  // NDVI-sectie: toon wanneer NDVI is gerenderd
+  var ndviSection = document.querySelector('.ulc-ndvi-section');
+  if (ndviSection) {
+    ndviSection.style.display = state.ndviLayer ? '' : 'none';
+  }
+
+  // BRP percelen: toon wanneer perceeldata geladen is
+  var percelenLabel = document.getElementById('ulc-layer-percelen');
+  if (percelenLabel) {
+    percelenLabel.style.display = state.brpGeoJSON ? '' : 'none';
+  }
+
+  // Selectie: toon wanneer er percelen geselecteerd zijn
+  var selectieLabel = document.getElementById('ulc-layer-selectie');
+  if (selectieLabel) {
+    selectieLabel.style.display = (state.selectedParcels && state.selectedParcels.length > 0) ? '' : 'none';
+  }
+
+  // Taakkaart: toon wanneer het taakkaart-grid gegenereerd is
+  var taakkaartLabel = document.getElementById('ulc-layer-taakkaart');
+  if (taakkaartLabel) {
+    taakkaartLabel.style.display = state.gridLayer ? '' : 'none';
+  }
 }
 
 export function updateLegendCrop(feature, byYear) {
@@ -369,3 +638,5 @@ export function clearLegendCrop() {
   const container = document.getElementById('legend-parcel');
   if (container) container.style.display = 'none';
 }
+
+

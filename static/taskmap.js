@@ -10,11 +10,11 @@
      - Re-renders export statistics after every change
    =================================================== */
 
-import { state, defaultClasses } from './state.js';
-import { toast, escapeHtml, showLoading, hideLoading, setLoadingDetail } from './utils.js';
-import { map, gridOverlay } from './map.js';
-import { drawNDVIHistogram, ndviToRGB, autoClassifyFromData, renderClassifiedNDVI } from './ndvi.js';
-import { activateStep } from './steps.js';
+import { state, defaultClasses } from './state.js?v=1';
+import { toast, escapeHtml, showLoading, hideLoading, setLoadingDetail } from './utils.js?v=1';
+import { map, gridOverlay, updateLayerVisibility } from './map.js?v=1';
+import { drawNDVIHistogram, ndviToRGB, autoClassifyFromData, renderClassifiedNDVI } from './ndvi.js?v=1';
+import { activateStep } from './steps.js?v=1';
 
 const { t, tf } = window;
 
@@ -82,7 +82,7 @@ if (northSouthBtn) {
 }
 
 // ==========================================
-// STEP 3 → 4: Data Analyse
+// STEP 2 → 4: Data Analyse (vanuit Percelen)
 // ==========================================
 const _gotoStep4Btn = document.querySelector('#goto-step4-btn');
 if (_gotoStep4Btn) {
@@ -90,6 +90,10 @@ if (_gotoStep4Btn) {
     e.stopPropagation();
     if (!state.selectedParcels || state.selectedParcels.length === 0) {
       toast(t('toastSelectParcels'), true);
+      return;
+    }
+    if (!state.ndviGrid) {
+      toast(t('toastNoNDVI'), true);
       return;
     }
     activateStep(4);
@@ -118,6 +122,8 @@ if (_gotoStep5Btn) {
     if (gridAngleValue) gridAngleValue.textContent = angle + '°';
     if (autoAngleHint) { autoAngleHint.textContent = tf('autoAngleHintAngle', angle); autoAngleHint.style.display = ''; }
     activateStep(5);
+    // Toon de doserings-editor
+    renderDosageEditor();
     // Genereer direct een taakkaart voor live preview
     try { generateTaskMap(); renderExportStats(); }
     catch (e) { console.warn('Vroege generate mislukt:', e); }
@@ -138,12 +144,6 @@ if (autoAngleBtn) {
     liveRegenerate();
   });
 }
-
-unitSelect.addEventListener('change', function () {
-  state.unit = unitSelect.value;
-  updateUnitHint(unitSelect.value);
-  liveRegenerate();
-});
 
 /**
  * Updates the unit description hint below the select element.
@@ -205,7 +205,7 @@ if (classMethodSelect) {
 export function renderClasses() {
   classesContainer.innerHTML =
     '<div class="class-labels">' +
-    '<span></span><span>' + t('clsName') + '</span><span>' + t('clsFrom') + '</span><span>' + t('clsTo') + '</span><span>' + t('clsDose') + '</span><span></span>' +
+    '<span></span><span>' + t('clsName') + '</span><span>' + t('clsFrom') + '</span><span>' + t('clsTo') + '</span><span></span>' +
     '</div>';
 
   state.classes.forEach(function (cls, i) {
@@ -216,7 +216,6 @@ export function renderClasses() {
       '<input type="text" value="' + escapeHtml(cls.name) + '" data-i="' + i + '" data-field="name">' +
       '<input type="number" step="0.01" value="' + cls.min + '" data-i="' + i + '" data-field="min">' +
       '<input type="number" step="0.01" value="' + cls.max + '" data-i="' + i + '" data-field="max">' +
-      '<input type="number" step="1" value="' + cls.rate + '" data-i="' + i + '" data-field="rate">' +
       '<button class="remove-class" data-i="' + i + '">×</button>';
     classesContainer.appendChild(row);
   });
@@ -242,6 +241,7 @@ export function renderClasses() {
     });
   });
 
+  renderDosageEditor();
   setTimeout(drawNDVIHistogram, 0);
 }
 
@@ -262,6 +262,75 @@ if (autoClassifyBtn) autoClassifyBtn.addEventListener('click', function () {
 window.addEventListener('ndvi:autoclassify', function () {
   renderClasses();
   renderClassifiedNDVI();
+  liveRegenerate();
+});
+
+// ==========================================
+// DOSAGE EDITOR (Step 5)
+// ==========================================
+const dosageContainer = document.querySelector('#dosage-container');
+
+/**
+ * Renders a compact dosage editor inside Step 5 (Taakkaart Instellen).
+ * Shows each class with its colour swatch, name, and an editable dosage
+ * input.  Changes trigger a live regenerate so the task map preview
+ * updates immediately.
+ */
+export function renderDosageEditor() {
+  if (!dosageContainer) return;
+  // Only render the dosage editor when Step 5 (Taakkaart) is the active step
+  if (!document.querySelector('#step-5.active')) return;
+
+  // If no classes exist yet, show placeholder
+  if (!state.classes || state.classes.length === 0) {
+    dosageContainer.innerHTML = '<p style="font-size:12px;color:var(--text-muted)">' + t('toastNoNDVI') + '</p>';
+    return;
+  }
+
+  let html = '';
+  state.classes.forEach(function (cls, i) {
+    html +=
+      '<div class="dosage-row">' +
+        '<span class="dosage-color" style="background:' + cls.color + '"></span>' +
+        '<span class="dosage-name">' + escapeHtml(cls.name) + '</span>' +
+        '<div class="dosage-input-wrap">' +
+          '<input type="number" step="1" min="0" value="' + cls.rate + '" data-i="' + i + '" class="dosage-input" />' +
+          '<span class="dosage-unit-label">' + escapeHtml(state.unit ? state.unit.split('/')[0] : '') + '</span>' +
+        '</div>' +
+      '</div>';
+  });
+  dosageContainer.innerHTML = html;
+
+  // Wire up change listeners
+  dosageContainer.querySelectorAll('.dosage-input').forEach(function (inp) {
+    inp.addEventListener('change', function () {
+      const i = parseInt(inp.dataset.i);
+      state.classes[i].rate = parseFloat(inp.value) || 0;
+      renderClassifiedNDVI();
+      liveRegenerate();
+    });
+    // Also update on input for live feel
+    inp.addEventListener('input', function () {
+      const i = parseInt(inp.dataset.i);
+      state.classes[i].rate = parseFloat(inp.value) || 0;
+    });
+  });
+}
+
+// Re-render dosage editor when step 5 is activated (via header click or navigation)
+window.addEventListener('step:activated', function (e) {
+  if (e.detail && e.detail.step === 5) {
+    renderDosageEditor();
+  }
+});
+
+// Re-render dosage editor when the unit changes (updates the unit label)
+unitSelect.addEventListener('change', function () {
+  state.unit = unitSelect.value;
+  updateUnitHint(unitSelect.value);
+  if (document.querySelector('#step-5.active')) {
+    renderDosageEditor();
+  }
   liveRegenerate();
 });
 
@@ -340,10 +409,10 @@ export function generateTaskMap() {
       const cls = classifyNDVI(meanNDVI);
       geoCell.properties = {
         ndvi: Math.round(meanNDVI * 1000) / 1000,
-        klasse: cls.name,
-        dosering: cls.rate,
-        eenheid: state.unit,
-        kleur: cls.color,
+        class: cls.name,
+        dose: cls.rate,
+        unit: state.unit,
+        color: cls.color,
       };
       features.push(geoCell);
     }
@@ -353,12 +422,12 @@ export function generateTaskMap() {
 
   gridOverlay.clearLayers();
   state.gridLayer = L.geoJSON(state.taskMapFC, {
-    style: f => ({ fillColor: f.properties.kleur, fillOpacity: 0.7, color: '#ffffff', weight: 1, opacity: 0.8 }),
+    style: f => ({ fillColor: f.properties.color, fillOpacity: 0.7, color: '#ffffff', weight: 1, opacity: 0.8 }),
     onEachFeature: function (f, layer) {
       layer.bindPopup(
-        '<b>' + f.properties.klasse + '</b><br>' +
+        '<b>' + f.properties['class'] + '</b><br>' +
         'NDVI: ' + f.properties.ndvi + '<br>' +
-        'Dosering: ' + f.properties.dosering + ' ' + f.properties.eenheid
+        'Rate: ' + f.properties.dose + ' ' + f.properties.unit
       );
     }
   }).addTo(gridOverlay);
@@ -366,6 +435,7 @@ export function generateTaskMap() {
   if (!map.hasLayer(gridOverlay)) map.addLayer(gridOverlay);
   const taakkaartCb = document.querySelector('.ulc-panel input[data-layer="taakkaart"]');
   if (taakkaartCb) taakkaartCb.checked = true;
+  updateLayerVisibility();
 }
 
 // ==========================================
@@ -480,8 +550,8 @@ export function renderExportStats() {
   features.forEach(function (f) {
     const a = turf.area(f);
     totalArea += a;
-    const k = f.properties.klasse;
-    if (!classCounts[k]) classCounts[k] = { count: 0, area: 0, color: f.properties.kleur, rate: f.properties.dosering };
+    const k = f.properties['class'];
+    if (!classCounts[k]) classCounts[k] = { count: 0, area: 0, color: f.properties.color, rate: f.properties.dose };
     classCounts[k].count++;
     classCounts[k].area += a;
   });

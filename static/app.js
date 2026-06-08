@@ -4,16 +4,16 @@
    DOM event listeners on load.
    =================================================== */
 
-import { state, defaultClasses } from './state.js';
-import { showLoading, hideLoading } from './utils.js';
-import { map, isMobileUI, syncLayerControlLayout, syncMobilePaneToggle } from './map.js';
-import { activateStep } from './steps.js';
-import { renderClasses, renderExportStats } from './taskmap.js';
+import { state, defaultClasses } from './state.js?v=1';
+import { showLoading, hideLoading } from './utils.js?v=1';
+import { map, isMobileUI, syncLayerControlLayout, syncMobilePaneToggle, updateLayerVisibility } from './map.js?v=1';
+import { activateStep } from './steps.js?v=1';
+import { renderClasses, renderExportStats } from './taskmap.js?v=1';
 
 // Side-effect imports — each module registers its own listeners
-import './geotiff-loader.js';
-import './brp.js';
-import './export.js';
+import './geotiff-loader.js?v=1';
+import './brp.js?v=1';
+import './export.js?v=1';
 
 // ==========================================
 // INIT
@@ -21,6 +21,7 @@ import './export.js';
 state.classes = defaultClasses();
 renderClasses();
 activateStep(1);
+updateLayerVisibility();
 
 // Initialiseer de eenheid-hint tekst bij het laden
 const unitSelectInit = document.querySelector('#unit-select');
