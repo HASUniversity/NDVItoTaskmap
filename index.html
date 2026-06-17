@@ -25,8 +25,7 @@
           </a>
         </div>
       </div>
-
-      <div class="sidebar-steps">
+    <div class="sidebar-steps">
         <!-- Stappenindicator -->
         <div class="step-progress" id="step-progress">
           <div class="step-progress-item active" data-progress="1">
@@ -104,6 +103,34 @@
           </div>
           <div class="step-body">
             <p class="step-desc" data-i18n="step2Desc">Klik op een perceel om het te selecteren of te deselecteren. Meerdere percelen zijn mogelijk.</p>
+
+            <!-- ─── Manual Field Drawing (worldwide) ─── -->
+            <div class="draw-section">
+              <div class="draw-section-header">
+                <span class="draw-section-icon">✏️</span>
+                <span class="draw-section-title" data-i18n="drawSectionTitle">Veld intekenen / Uploaden</span>
+              </div>
+              <p class="step-desc" style="font-size:12px;margin-bottom:8px" data-i18n="drawSectionDesc">Teken een veld op de kaart of upload een GeoJSON bestand. Werkt wereldwijd.</p>
+              <div class="draw-toolbar">
+                <button class="btn btn-small btn-outline" id="draw-polygon-btn" style="flex:1">
+                  <svg viewBox="0 0 20 20" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5"><path d="M3 5l5-2 8 4 2 6-6 4-7-2z"/></svg>
+                  <span data-i18n="drawPolygon">Teken veld</span>
+                </button>
+                <button class="btn btn-small btn-outline" id="draw-rect-btn" style="flex:1">
+                  <svg viewBox="0 0 20 20" style="width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5"><rect x="2" y="3" width="16" height="14" rx="1"/></svg>
+                  <span data-i18n="drawRect">Teken rechthoek</span>
+                </button>
+                <button class="btn btn-small btn-outline" id="upload-geojson-btn" style="flex:1">
+                  📂 <span data-i18n="uploadGeoJSON">Upload GeoJSON</span>
+                </button>
+              </div>
+              <input type="file" id="geojson-file-input" accept=".geojson,.json" style="display:none" />
+              <div id="draw-status" class="draw-status" style="display:none">
+                <span id="draw-status-text" data-i18n="drawClickFirst">Klik op de kaart om het eerste punt te plaatsen</span>
+                <button class="btn btn-xs btn-outline" id="cancel-draw-btn" style="margin-left:auto;flex-shrink:0">✕</button>
+              </div>
+            </div>
+
             <div id="parcel-info" class="hidden">
               <div class="info-row"><span class="label" data-i18n="labelSelected">Geselecteerd:</span><span id="parcel-count"></span></div>
               <div class="info-row"><span class="label" data-i18n="labelArea">Totale oppervlakte:</span><span id="parcel-area"></span></div>
@@ -129,10 +156,7 @@
             <!-- Navigatie -->
             <div class="step-nav">
               <button class="btn btn-back btn-prev" data-prev="1" data-i18n="btnBack">Vorige</button>
-              <button class="btn btn-primary btn-next" data-next="3" data-i18n="btnNext">Volgende</button>
-              <button class="btn btn-primary" id="goto-step4-btn" data-i18n="btnContinueToAnalysis">
-                Verder: Data analyse →
-              </button>
+              <button class="btn btn-primary" id="goto-step4-btn" data-i18n="btnNext">Volgende</button>
             </div>
           </div>
         </section>
@@ -190,9 +214,9 @@
                     </label>
                   </div>
                   <div class="form-row" id="resolution-row">
-                    <label for="resolution-slider"><span data-i18n="labelResolution">Resolutie:</span> <span id="resolution-value">1024</span> px</label>
-                    <input type="range" id="resolution-slider" min="512" max="8192" step="512" value="1024" style="width:100%" />
-                    <div style="display:flex;justify-content:space-between;font-size:10px;color:#888"><span data-i18n="res512">512 (snel)</span><span data-i18n="res8192">8192 (nauwkeurig)</span></div>
+                    <label for="resolution-slider"><span data-i18n="labelResolution">Resolutie:</span> <span id="resolution-value">2048</span> px</label>
+                    <input type="range" id="resolution-slider" min="64" max="16000" step="64" value="2048" style="width:100%" />
+                    <div style="display:flex;justify-content:space-between;font-size:10px;color:#888"><span id="res-min-label">512 (snel)</span><span id="res-max-label">8192 (nauwkeurig)</span></div>
                   </div>
                 </div>
               </div>
@@ -314,6 +338,37 @@
               <p class="hint" id="auto-angle-hint" style="display:none"></p>
             </div>
 
+            <!-- Dosering per klasse -->
+            <div class="form-row" style="margin-top:14px">
+              <label data-i18n="labelDosagePerClass">Dosering per klasse</label>
+              <div id="dosage-container"></div>
+            </div>
+
+            <!-- ─── Individual Cell Override Editor ─── -->
+            <div id="cell-override-section" class="cell-override-section" style="display:none">
+              <div class="ulc-sep"></div>
+              <div class="cell-override-header">
+                <span class="cell-override-icon">🎯</span>
+                <span class="cell-override-title" data-i18n="cellOverrideTitle">Cel Overschrijven</span>
+              </div>
+              <div id="cell-override-info" class="cell-override-info">
+                <div class="info-row"><span class="label" data-i18n="cellClass">Klasse:</span><span id="co-class"></span></div>
+                <div class="info-row"><span class="label" data-i18n="cellNDVI">NDVI:</span><span id="co-ndvi"></span></div>
+                <div class="info-row"><span class="label" data-i18n="cellArea">Oppervlakte:</span><span id="co-area"></span></div>
+              </div>
+              <div class="form-row">
+                <label for="cell-dose-input" data-i18n="cellDoseLabel">Aangepaste dosering</label>
+                <div class="dosage-input-wrap">
+                  <input type="number" id="cell-dose-input" step="1" min="0" value="" />
+                  <span class="dosage-unit-label" id="co-unit-label"></span>
+                </div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-small btn-primary" id="apply-cell-override-btn" style="flex:1" data-i18n="cellApply">Toepassen</button>
+                <button class="btn btn-small btn-outline" id="clear-cell-override-btn" style="flex:1" data-i18n="cellClear">Herstel klasse</button>
+              </div>
+            </div>
+
             <div class="advanced-toggle-wrap">
               <button class="advanced-toggle-btn" id="advanced-taskmap-toggle" type="button">
                 <svg class="chevron-sm" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
@@ -345,7 +400,10 @@
               <input type="text" id="export-name" placeholder="bron_20250602_taskmap" />
             </div>
             <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
-              <button class="btn btn-primary" id="export-shp-btn">
+              <button class="btn btn-primary" id="export-pdf-btn">
+                📄 PDF — Kaart met legenda &amp; schaalbalk
+              </button>
+              <button class="btn btn-outline" id="export-shp-btn">
                 <svg viewBox="0 0 20 20" class="btn-icon"><path d="M10 1v12m0 0l-4-4m4 4l4-4M3 15v2a2 2 0 002 2h10a2 2 0 002-2v-2"/></svg>
                 Shapefile — PTx, ArcGIS, QGIS, FarmServ, John Deere
               </button>
@@ -394,9 +452,12 @@
 
   <!-- Vendor JS (local files) -->
   <script src="static/vendor/leaflet.js"></script>
+  <script src="static/patch-leaflet.js"></script>
   <script src="static/vendor/proj4.js"></script>
   <script src="static/vendor/turf.min.js"></script>
   <script src="static/vendor/geotiff.js"></script>
+  <!-- PDF export library (jsPDF) — map wordt direct via canvas gerenderd, geen html2canvas meer nodig -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <!-- i18n (must load before app.js) -->
   <script src="static/i18n.js?v=4"></script>
   <!-- App -->
@@ -415,7 +476,7 @@
       SAVI:'SAVI', OSAVI:'OSAVI', MNLI:'MNLI',
       EVI:'EVI', LAI:'LAI', LAI_SAVI:'LAI (SAVI)', LAI_NDRE:'LAI (NDRE)',
       ARVI:'ARVI', ENDVI:'ENDVI', MSR:'MSR',
-      RDVI:'RDVI', TDVI:'TDVI', BAI:'BAI',
+      RDVI:'RDVI', TDVI:'TDVI', BAI:'BAI', WDVI:'WDVI',
       NGRDI:'NGRDI', VARI:'VARI', TGI:'TGI',
       MPRI:'MPRI', EXG:'EXG', GLI:'GLI',
       vNDVI:'vNDVI', NDYI:'NDYI'

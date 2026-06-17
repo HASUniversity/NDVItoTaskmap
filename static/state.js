@@ -39,6 +39,7 @@ export const VEGETATION_INDICES = [
   { id: 'RDVI', label: 'RDVI', formula: '(NIR − R) / √(NIR + R)', desc: 'Renormalized Difference Vegetation Index — benadrukt gezonde vegetatie.', purpose: 'Gezonde vegetatie', range: '-1 tot 1', type: 'nir', clampRange: true, needsNIR: true, needsRed: true },
   { id: 'TDVI', label: 'TDVI', formula: '1.5 × ((NIR − R) / √(NIR² + R + 0.5))', desc: 'Transformed Difference Vegetation Index — voor stedelijke vegetatie.', purpose: 'Stedelijke vegetatie', range: '-1 tot 1', type: 'nir', clampRange: true, needsNIR: true, needsRed: true },
   { id: 'BAI', label: 'BAI', formula: '1 / ((0.1−R)² + (0.06−NIR)²)', desc: 'Burn Area Index — detecteert verbrande grond.', purpose: 'Branddetectie', range: '0 tot ∞', type: 'nir', clampRange: false, needsRed: true, needsNIR: true },
+  { id: 'WDVI', label: 'WDVI', formula: 'NIR − 1.2 × R', desc: 'Weighted Difference Vegetation Index — gecorrigeerd voor bodemreflectie via de soil-line parameter (a=1.2). Gerelateerd aan biomassa, net als NDVI.', purpose: 'Biomassa, bodemcorrectie', range: '−0.5 tot 1+', type: 'nir', clampRange: false, needsNIR: true, needsRed: true },
 
   // ─── RGB-based indices (visible light only, no NIR needed) ───
   { id: 'NGRDI', label: 'NGRDI', formula: '(G − R) / (G + R)', desc: 'Normalized Green-Red Difference Index — eenvoudige RGB vegetatie-index.', purpose: 'RGB vegetatie', range: '-1 tot 1', type: 'rgb', clampRange: true, needsGreen: true, needsRed: true },
@@ -90,6 +91,8 @@ export const state = {
   ndviLayer: null,
   geotiffEPSG: null,
   sourceFileName: null,
+  sourceWidth: null,
+  sourceHeight: null,
   blobUrl: null,
   tiff: null,
   tiffImage: null,
@@ -123,6 +126,17 @@ export const state = {
   ndviScaleMax: null,
   brpLayerMap: {},
 
+  /** Drawing mode for manual field delineation (outside NL) */
+  drawMode: false,
+  drawLayer: null,
+  drawTempPoints: [],
+  drawStartPoint: null,
+  manualFields: [],
+
+  /** Individual task map cell selection & dosage overrides */
+  selectedCellId: null,
+  selectedCellLayer: null,
+  cellOverrides: {},       // { "cell-index": dosageRate }
 
   /** Classification method for auto-classify:
    *  'quantile' — equal area (default)

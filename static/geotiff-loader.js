@@ -11,12 +11,12 @@
      - Compute button wiring
    =================================================== */
 
-import { state, VEGETATION_INDICES } from './state.js?v=1';
+import { state, VEGETATION_INDICES, defaultClasses } from './state.js?v=1';
 import { ensureEPSG, showLoading, hideLoading, toast, setLoadingDetail } from './utils.js?v=1';
 import { escapeHtml } from './utils.js?v=1';
-import { displayNDVI, displayRGB, zoomToGeoTIFF, autoClassifyFromData, clipNDVIToParcel } from './ndvi.js?v=1';
-import { showLegendInPanel } from './map.js?v=1';
-import { startBRPLoading } from './brp.js?v=1';
+import { displayNDVI, displayRGB, zoomToGeoTIFF, autoClassifyFromData, clipNDVIToParcel, renderClassifiedNDVI } from './ndvi.js?v=1';
+import { map, ndviOverlay, brpOverlay, selectionOverlay, gridOverlay, showLegendInPanel, updateLayerVisibility, clearLegendCrop } from './map.js?v=1';
+import { startBRPLoading, stopBRPLoading, stopDrawing } from './brp.js?v=1';
 import { activateStep } from './steps.js?v=1';
 
 const { t, tf } = window;
@@ -47,12 +47,67 @@ export { stretchCheck };
 /**
  * Returns the pixel-dimension limit selected by the resolution slider.
  * The raster is scaled so that its largest dimension equals this value.
- * @returns {number} Pixel limit (512–8192).
+ * @returns {number} Pixel limit (dynamisch obv data).
  */
 export function getRequestedResolution() {
-  const requested = resolutionSlider ? parseInt(resolutionSlider.value, 10) : 1024;
-  return isNaN(requested) ? 1024 : requested;
+  const requested = resolutionSlider ? parseInt(resolutionSlider.value, 10) : 2048;
+  return isNaN(requested) ? 2048 : requested;
 }
+
+/**
+ * Update the resolution slider's min/max/step based on the actual
+ * GeoTIFF dimensions so the user can always select the full native
+ * resolution — no more, no less.
+ */
+function updateResolutionSliderForData(fullW, fullH) {
+  const maxDim = Math.max(fullW, fullH);
+  // De step moet KLEIN genoeg zijn zodat de default-waarde een veelvoud is.
+  // Forceren: max 64px per stap, of maxDim/100 (voor grote TIFs), wat het kleinst is.
+  let step = Math.min(64, Math.max(1, Math.round(maxDim / 100)));
+  // Afronden naar macht van 2 voor schone intervallen
+  step = Math.pow(2, Math.round(Math.log2(step)));
+
+  const min = Math.min(64, Math.max(step, Math.round(maxDim / 16)));
+  const max = maxDim;
+
+  resolutionSlider.min = min;
+  resolutionSlider.max = max;
+  resolutionSlider.step = step;
+
+  // Kies een redelijke standaard-resolutie:
+  // - maxDim < 2000 px (kleine TIF): 512
+  // - maxDim 2000-5000 px: 1024
+  // - maxDim > 5000 px (grote TIF): 2048
+  let defaultRes;
+  if (maxDim <= 2000) defaultRes = 512;
+  else if (maxDim <= 5000) defaultRes = 1024;
+  else defaultRes = 2048;
+  // Zet de waarde direct (zonder step-snap, want step is nu <= defaultRes)
+  if (defaultRes % step !== 0) {
+    // Mocht defaultRes geen veelvoud zijn, neem dan het dichtstbijzijnde lagere veelvoud
+    defaultRes = Math.floor(defaultRes / step) * step;
+  }
+  resolutionSlider.value = defaultRes;
+  resolutionValue.textContent = defaultRes;
+  console.log('[Slider] maxDim=' + maxDim + ' step=' + step + ' min=' + min + ' max=' + max + ' default=' + defaultRes + ' final=' + resolutionSlider.value);
+}
+
+/**
+ * Refresh the text labels below the resolution slider so they reflect
+ * the actual min/max values and the current language.
+ */
+function updateResolutionLabels() {
+  const lang = document.documentElement.lang || 'nl';
+  const fastLabel = lang === 'nl' ? '(snel)' : '(fast)';
+  const preciseLabel = lang === 'nl' ? '(nauwkeurig)' : '(precise)';
+  const minLabel = document.querySelector('#res-min-label');
+  const maxLabel = document.querySelector('#res-max-label');
+  if (minLabel) minLabel.textContent = resolutionSlider.min + ' ' + fastLabel;
+  if (maxLabel) maxLabel.textContent = resolutionSlider.max + ' ' + preciseLabel;
+}
+
+// Re-apply resolution labels on language switch
+window.addEventListener('langchange', updateResolutionLabels);
 
 async function reloadResolutionFromSlider() {
   if (!state.tiff || !state.tiffImage) return;
@@ -60,10 +115,25 @@ async function reloadResolutionFromSlider() {
   showLoading(tf('loadingReload', targetResolution));
   setLoadingDetail(state.sourceFileName + ' @ ' + targetResolution + ' px');
   resolutionSlider.disabled = true;
+
+  // Invalidate old pixel mask — dimensions change with resolution so a
+  // stale mask would point to wrong pixel coordinates, causing the overlay
+  // to show data from the wrong location (e.g. top-right corner).
+  state.ndviMaskData = null;
+  state.ndviMaskParcels = null;
+
   try {
     await rebuildGeoRasterAtResolution(targetResolution);
-    displayNDVI();
+    await displayNDVI();
     autoClassifyFromData();
+
+    // Re-clip to selected parcels if any — the mask was just invalidated
+    // and the GeoJSON geometry in state.selectedParcels is still valid.
+    if (state.selectedParcels && state.selectedParcels.length > 0) {
+      await clipNDVIToParcel(state.selectedParcels);
+      renderClassifiedNDVI();
+    }
+
     toast(tf('toastResolutionSet', targetResolution));
   } catch (err) {
     console.error(err);
@@ -198,28 +268,82 @@ export async function rebuildGeoRasterAtResolution(maxDim) {
   noDataVal = (noDataVal !== null && noDataVal !== undefined) ? parseFloat(noDataVal) : null;
   if (noDataVal !== null && isNaN(noDataVal)) noDataVal = null;
 
+  // ── Overview-selectie ──
+  // Overviews in TIFF zijn geordend van groot (IFD 0) naar klein (laatste IFD).
+  // Voor lage-res reads (<= 512 px) pakken we direct de KLEINSTE overview (laatste IFD).
+  // Dit vermijdt dat we ALLE overviews moeten laden en dat readRasters de
+  // volledige 1.1 GB moet decoderen.
   let readImage = image;
+  let useNativeRes = false;  // true = geen verdere readRasters-downsample nodig
+
   if (imageCount > 1) {
-    const candidates = [];
-    for (let oi = 1; oi < imageCount; oi++) {
-      const ov = await tiff.getImage(oi);
-      candidates.push({ idx: oi, w: ov.getWidth(), img: ov });
+    if (maxDim <= 512) {
+      // Pak direct de kleinste overview (laatste IFD) — dit is supersnel
+      setLoadingDetail('Kleinste overzicht laden...');
+      const smallestIdx = imageCount - 1;
+      const smallest = await tiff.getImage(smallestIdx);
+      const sw = smallest.getWidth(), sh = smallest.getHeight();
+      console.log('[Resolutie] Kleinste overview: IFD=' + smallestIdx + ' ' + sw + 'x' + sh);
+      if (sw <= maxDim * 2) {
+        // Kleinste overview is al klein genoeg — gebruik native resolutie
+        readImage = smallest;
+        maxDim = sw;  // pas maxDim aan zodat er niet wordt opgeschaald
+        useNativeRes = true;
+      } else {
+        // Kleinste overview is nog te groot — verderop normale search
+        readImage = smallest;
+      }
     }
-    candidates.sort((a, b) => a.w - b.w);
-    for (let ci = 0; ci < candidates.length; ci++) {
-      if (candidates[ci].w >= maxDim) { readImage = candidates[ci].img; break; }
+    if (!useNativeRes) {
+      // Zoek de overview die het dichtst bij maxDim zit (maar erboven)
+      setLoadingDetail('Beste overzicht zoeken...');
+      let bestImg = null;
+      let bestW = Infinity;
+      // Overviews zijn van groot → klein, dus we zoeken van voor naar achter
+      // en stoppen zodra we voorbij maxDim zijn (want kleiner wordt alleen maar kleiner)
+      for (let oi = 1; oi < imageCount; oi++) {
+        const ov = await tiff.getImage(oi);
+        const w = ov.getWidth();
+        if (w >= maxDim) {
+          // Deze is >= maxDim — check of deze dichterbij is dan beste
+          if (!bestImg || (w - maxDim) < (bestW - maxDim)) {
+            bestImg = ov;
+            bestW = w;
+          }
+        } else {
+          // w < maxDim: overviews worden steeds kleiner, dus hierna komen
+          // alleen nog kleinere — stop met zoeken
+          if (bestImg) break;
+          // Geen enkele overview >= maxDim gevonden; gebruik de grootste die we hebben
+          if (!bestImg) { bestImg = ov; bestW = w; }
+          break;
+        }
+      }
+      if (bestImg) readImage = bestImg;
     }
   }
 
   const rw = readImage.getWidth(), rh = readImage.getHeight();
-  const scale = Math.max(rw / maxDim, rh / maxDim, 1);
-  const tw = Math.ceil(rw / scale), th = Math.ceil(rh / scale);
-  console.log('[Resolutie] slider=' + maxDim + ' overview=' + rw + 'x' + rh + ' output=' + tw + 'x' + th + ' scale=' + scale.toFixed(2));
+
+  let tw, th, rasters;
+  if (useNativeRes) {
+    // Geen downsample nodig — lees de overview op z'n native resolutie
+    tw = rw;
+    th = rh;
+    console.log('[Resolutie] Native overview: ' + tw + 'x' + th);
+    setLoadingDetail('Banden laden (' + tw + '×' + th + ' px)...');
+    rasters = await readImage.readRasters({ interleave: false });
+  } else {
+    const scale = Math.max(rw / maxDim, rh / maxDim, 1);
+    tw = Math.ceil(rw / scale);
+    th = Math.ceil(rh / scale);
+    console.log('[Resolutie] slider=' + maxDim + ' overview=' + rw + 'x' + rh + ' output=' + tw + 'x' + th + ' scale=' + scale.toFixed(2));
+    setLoadingDetail('Banden laden (' + tw + '×' + th + ' px)...');
+    rasters = await readImage.readRasters({ interleave: false, width: tw, height: th, resampleMethod: 'nearest' });
+  }
 
   const loadingText = document.querySelector('#loading-text');
   if (loadingText) loadingText.textContent = tf('loadingBands', tw, th);
-
-  const rasters = await readImage.readRasters({ interleave: false, width: tw, height: th, resampleMethod: 'bilinear' });
 
   const bandMetas = state.bandMetas || [];
   const isFloat = bandMetas.length > 0 && bandMetas[0].sampleFormat === 3;
@@ -265,6 +389,131 @@ export async function rebuildGeoRasterAtResolution(maxDim) {
 }
 
 // ==========================================
+// APP RESET
+// ==========================================
+/**
+ * Resets the application to its initial clean state — clears all map
+ * overlays, resets state variables, and returns the wizard to step 1.
+ * Called automatically at the start of handleFileUpload() when the user
+ * picks a new GeoTIFF, simulating a full page reset (F5) without
+ * actually reloading the page.
+ */
+function resetApp() {
+  // Bail out early if no TIF is loaded yet — nothing to reset.
+  if (!state.tiff) return;
+
+  // ── 1. Stop background processes ──
+  stopBRPLoading();
+  if (state.drawMode) stopDrawing();
+
+  // ── 2. Clear map overlay layers ──
+  ndviOverlay.clearLayers();
+  brpOverlay.clearLayers();
+  selectionOverlay.clearLayers();
+  gridOverlay.clearLayers();
+  if (map.hasLayer(gridOverlay)) map.removeLayer(gridOverlay);
+
+  // ── 3. Reset state back to defaults ──
+  state.georaster        = null;
+  state.ndviLayer        = null;
+  state.geotiffEPSG      = null;
+  state.sourceFileName   = null;
+  state.sourceWidth      = null;
+  state.sourceHeight     = null;
+  state.tiff             = null;
+  state.tiffImage        = null;
+  state.bandMetas        = [];
+  state.isRGBProxy       = false;
+  state.brpLayer         = null;
+  state.brpGeoJSON       = null;
+  state.selectedParcels  = [];
+  state.selectedParcelsLayer = null;
+  state.maskLayer        = null;
+  state.gridLayer        = null;
+  state.taskMapFC        = null;
+  state.gridSize         = 10;
+  state.gridAngle        = 0;
+  state.parcelHistoryCache = {};
+  state.numAlphaBands    = 0;
+  state.bandRed          = null;
+  state.bandGreen        = null;
+  state.bandBlue         = null;
+  state.bandNIR          = null;
+  state.bandRedEdge      = null;
+  state.selectedVI       = 'NDVI';
+  state.classes          = defaultClasses();
+  state.unit             = 'kg/ha';
+  state.currentStep      = 1;
+  state.isPreCalc        = false;
+  state.brpLoading       = false;
+  state.ndviHistogramData  = null;
+  state.ndviGrid         = null;
+  state.ndviScaleMin     = null;
+  state.ndviScaleMax     = null;
+  state.brpLayerMap      = {};
+  state.drawMode         = false;
+  state.drawLayer        = null;
+  state.drawTempPoints   = [];
+  state.drawStartPoint   = null;
+  state.manualFields     = [];
+  state.selectedCellId   = null;
+  state.selectedCellLayer = null;
+  state.cellOverrides    = {};
+  state.classificationMethod = 'quantile';
+  state.ndviMaskData     = null;
+  state.ndviMaskParcels  = null;
+
+  if (state.blobUrl) {
+    URL.revokeObjectURL(state.blobUrl);
+    state.blobUrl = null;
+  }
+
+  // ── 4. Clear file info UI ──
+  document.querySelector('#file-info').classList.add('hidden');
+  document.querySelector('#info-filename').textContent = '';
+  document.querySelector('#info-dims').textContent = '';
+  document.querySelector('#info-bands').textContent = '';
+  document.querySelector('#info-mode').textContent = '';
+  document.querySelector('#info-ndvi-range').textContent = '';
+  document.querySelector('#ndvi-stats-row').classList.add('hidden');
+
+  // ── 5. Clear band & VI selectors ──
+  document.querySelector('#band-info-row').classList.add('hidden');
+  ['#red-band', '#green-band', '#blue-band', '#nir-band', '#rededge-band'].forEach(function (sel) {
+    const el = document.querySelector(sel);
+    if (el) el.innerHTML = '';
+  });
+  if (viSelect) viSelect.innerHTML = '';
+  document.querySelector('#band-desc').textContent = '';
+
+  // ── 6. Hide histogram ──
+  const histWrap = document.querySelector('#ndvi-histogram-wrap');
+  if (histWrap) histWrap.style.display = 'none';
+
+  // ── 7. Reset wizard to step 1 and hide legend/NDVI sections ──
+  activateStep(1);
+  const ndviSection = document.querySelector('.ulc-ndvi-section');
+  if (ndviSection) ndviSection.style.display = 'none';
+  clearLegendCrop();
+  updateLayerVisibility();
+
+  // ── 8. Reset legend labels to defaults ──
+  const legendLabels = document.querySelector('#legend-labels');
+  if (legendLabels) legendLabels.innerHTML = '<span>-0.20</span><span>0.40</span><span>1.00</span>';
+
+  // ── 9. Reset resolution slider ──
+  const resSlider = document.querySelector('#resolution-slider');
+  if (resSlider) {
+    resSlider.min = 64;
+    resSlider.max = 2048;
+    resSlider.step = 64;
+    resSlider.value = 1024;
+  }
+  const resVal = document.querySelector('#resolution-value');
+  if (resVal) resVal.textContent = '1024 px';
+}
+
+// ==========================================
 // FILE UPLOAD
 // ==========================================
 geotiffInput.addEventListener('change', function (e) {
@@ -282,7 +531,10 @@ fileDrop.addEventListener('drop', function (e) {
 });
 
 async function handleFileUpload(file) {
-  if (state.blobUrl) { URL.revokeObjectURL(state.blobUrl); state.blobUrl = null; }
+  // Reset the app to a clean state if a TIF was already loaded — this
+  // clears all map overlays, resets wizard steps, and aborts background
+  // processes, effectively simulating a page F5 before loading the new file.
+  resetApp();
   showLoading(t('loadingGeoTIFF'));
   setLoadingDetail(file.name + ' (' + (file.size / 1024 / 1024).toFixed(1) + ' MB)');
   try {
@@ -292,7 +544,9 @@ async function handleFileUpload(file) {
     const blobUrl = URL.createObjectURL(file);
     state.blobUrl = blobUrl;
 
+    setLoadingDetail('TIF-structuur parseren...');
     const tiff = await GTIFF.fromUrl(blobUrl);
+    setLoadingDetail('Overzichten indexeren...');
     const imageCount = await tiff.getImageCount();
     const image = await tiff.getImage(0);
 
@@ -300,6 +554,13 @@ async function handleFileUpload(file) {
     const bbox   = image.getBoundingBox();
     const fullW  = image.getWidth();
     const fullH  = image.getHeight();
+
+    // Store original dimensions for resolution slider
+    state.sourceWidth = fullW;
+    state.sourceHeight = fullH;
+
+    // Dynamically set slider range based on the actual source dimensions
+    updateResolutionSliderForData(fullW, fullH);
 
     // Detect alpha channels
     const fd = image.fileDirectory || {};
@@ -341,6 +602,7 @@ async function handleFileUpload(file) {
 
     const bandMetas = [];
     for (let bi = 0; bi < nBands; bi++) {
+      setLoadingDetail('Band ' + (bi + 1) + ' van ' + nBands + ' verwerken...');
       const bmeta = image.getGDALMetadata(bi) || {};
       const bmetaLC = {};
       for (const k in bmeta) if (Object.prototype.hasOwnProperty.call(bmeta, k)) bmetaLC[k.toLowerCase()] = bmeta[k];
@@ -389,7 +651,10 @@ async function handleFileUpload(file) {
     const { width: tw, height: th } = rasterInfo;
 
     document.querySelector('#info-filename').textContent = file.name;
-    document.querySelector('#info-dims').textContent = fullW + ' \xd7 ' + fullH + ' px';
+    // Toon zowel volledige als geladen dimensies zodat duidelijk is dat er
+    // NIET op volle resolutie wordt gewerkt
+    const loadedNote = tw < fullW ? ' (gelaagd: ' + tw + '\xd7' + th + ' px)' : '';
+    document.querySelector('#info-dims').textContent = fullW + ' \xd7 ' + fullH + ' px' + loadedNote;
     document.querySelector('#info-bands').textContent = nDataBands + (nAlpha > 0 ? ' (+ ' + nAlpha + ' alpha)' : '');
     fileInfo.classList.remove('hidden');
 
@@ -397,10 +662,11 @@ async function handleFileUpload(file) {
       state.isPreCalc = true;
       state.isRGBProxy = false;
       document.querySelector('#info-mode').textContent = t('modePrecalcNDVI');
+      setLoadingDetail(t('loadingRender'));
+      await displayNDVI();
+      autoClassifyFromData();
       hideLoading();
       toast(t('toastNDVIDetected'));
-      displayNDVI();
-      autoClassifyFromData();
       zoomToGeoTIFF();
       activateStep(2);
       startBRPLoading();
@@ -414,10 +680,11 @@ async function handleFileUpload(file) {
       populateBandSelectors(nDataBands);
       populateVISelect();
       document.querySelector('#band-desc').textContent = t('bandDescRGB');
+      setLoadingDetail(t('loadingRender'));
+      await displayNDVI();
+      autoClassifyFromData();
       hideLoading();
       toast(t('toastRGBDetected'));
-      displayNDVI();
-      autoClassifyFromData();
       zoomToGeoTIFF();
       activateStep(2);
       startBRPLoading();
@@ -617,13 +884,13 @@ computeBtn.addEventListener('click', function () {
   if (missingBand) { toast(tf('toastMissingBand', vi), true); return; }  // Her-populeer de VI lijst (want bandtoewijzing kan veranderd zijn)
   populateVISelect();  showLoading(tf('loadingVI', vi));
   setLoadingDetail(state.sourceFileName + ' \u2014 ' + vi + ' @ ' + getRequestedResolution() + ' px');
-  setTimeout(function () {
-    displayNDVI();
+  setTimeout(async function () {
+    await displayNDVI();
     autoClassifyFromData();
     zoomToGeoTIFF();
     // Als er al percelen geselecteerd zijn, knip de VI direct naar de selectie
     if (state.selectedParcels && state.selectedParcels.length > 0) {
-      clipNDVIToParcel(state.selectedParcels);
+      await clipNDVIToParcel(state.selectedParcels);
       if (state.classificationMethod !== 'manual') {
         autoClassifyFromData();
       }
@@ -634,3 +901,6 @@ computeBtn.addEventListener('click', function () {
     startBRPLoading();
   }, 50);
 });
+
+
+// EOF

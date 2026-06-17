@@ -82,7 +82,7 @@ if (northSouthBtn) {
 }
 
 // ==========================================
-// STEP 2 → 4: Data Analyse (vanuit Percelen)
+// STEP 2 → Volgende: slimme routing
 // ==========================================
 const _gotoStep4Btn = document.querySelector('#goto-step4-btn');
 if (_gotoStep4Btn) {
@@ -93,9 +93,11 @@ if (_gotoStep4Btn) {
       return;
     }
     if (!state.ndviGrid) {
-      toast(t('toastNoNDVI'), true);
+      // NDVI nog niet beschikbaar → ga naar stap 3 (Banden & Index)
+      activateStep(3);
       return;
     }
+    // NDVI is al berekend → spring naar Data Analyse
     activateStep(4);
   });
 }
@@ -289,14 +291,16 @@ export function renderDosageEditor() {
 
   let html = '';
   state.classes.forEach(function (cls, i) {
+    const ndviRange = cls.min.toFixed(2) + ' – ' + cls.max.toFixed(2);
     html +=
       '<div class="dosage-row">' +
         '<span class="dosage-color" style="background:' + cls.color + '"></span>' +
         '<span class="dosage-name">' + escapeHtml(cls.name) + '</span>' +
+        '<span class="dosage-ndvi-range">' + ndviRange + '</span>' +
         '<div class="dosage-input-wrap">' +
           '<input type="number" step="1" min="0" value="' + cls.rate + '" data-i="' + i + '" class="dosage-input" />' +
-          '<span class="dosage-unit-label">' + escapeHtml(state.unit ? state.unit.split('/')[0] : '') + '</span>' +
         '</div>' +
+        '<span class="dosage-unit-label">' + escapeHtml(state.unit ? state.unit.split('/')[0] : '') + '</span>' +
       '</div>';
   });
   dosageContainer.innerHTML = html;
@@ -436,6 +440,14 @@ export function generateTaskMap() {
   const taakkaartCb = document.querySelector('.ulc-panel input[data-layer="taakkaart"]');
   if (taakkaartCb) taakkaartCb.checked = true;
   updateLayerVisibility();
+
+  // Enable cell click interaction after grid renders
+  setTimeout(enableCellInteraction, 200);
+  // Hide cell override panel on regeneration
+  var coSection = document.querySelector('#cell-override-section');
+  if (coSection) coSection.style.display = 'none';
+  state.selectedCellId = null;
+  state.selectedCellLayer = null;
 }
 
 // ==========================================
@@ -641,3 +653,247 @@ function rotateGeometry(geom, pivot, angleDeg) {
 function rotateFeature(feat, pivot, angleDeg) {
   return { type: 'Feature', geometry: rotateGeometry(feat.geometry, pivot, angleDeg), properties: feat.properties };
 }
+
+// ==========================================
+// INDIVIDUAL CELL SELECTION & OVERRIDE
+// ==========================================
+
+/**
+ * Enables cell click interaction on the task map grid.
+ * Called after generateTaskMap().
+ */
+function enableCellInteraction() {
+  if (!state.gridLayer) return;
+
+  state.gridLayer.eachLayer(function (layer) {
+    if (!layer.feature) return;
+    var idx = state.taskMapFC.features.indexOf(layer.feature);
+
+    layer.off('click');
+    layer.on('click', function (e) {
+      L.DomEvent.stopPropagation(e);
+      selectGridCell(idx, layer);
+    });
+
+    // Style cells that have a dosage override
+    if (state.cellOverrides[idx] !== undefined) {
+      layer.setStyle({
+        fillColor: '#FF6600',
+        fillOpacity: 0.85,
+        color: '#fff',
+        weight: 2
+      });
+    }
+  });
+}
+
+/**
+ * Selects a grid cell and shows the override editor.
+ * @param {number} idx - Index into state.taskMapFC.features
+ * @param {object} layer - Leaflet layer
+ */
+export function selectGridCell(idx, layer) {
+  // Deselect previous
+  if (state.selectedCellLayer) {
+    _restoreCellStyle(state.selectedCellId);
+  }
+
+  state.selectedCellId = idx;
+  state.selectedCellLayer = layer;
+
+  // Highlight selected cell
+  layer.setStyle({
+    color: '#FF6600',
+    weight: 4,
+    fillOpacity: 0.9,
+    dashArray: ''
+  });
+  layer.bringToFront();
+
+  // Show override editor
+  var feature = state.taskMapFC.features[idx];
+  var props = feature.properties;
+  var area = turf.area(feature);
+
+  document.querySelector('#co-class').textContent = props['class'] || '—';
+  document.querySelector('#co-ndvi').textContent = props.ndvi || '—';
+  document.querySelector('#co-area').textContent = (area / 10000).toFixed(4) + ' ha';
+
+  var doseInput = document.querySelector('#cell-dose-input');
+  var unitLabel = document.querySelector('#co-unit-label');
+  if (unitLabel) unitLabel.textContent = state.unit ? state.unit.split('/')[0] : '';
+
+  // Show override or class default
+  var overrideVal = state.cellOverrides[idx];
+  if (doseInput) {
+    doseInput.value = overrideVal !== undefined ? overrideVal : props.dose;
+  }
+
+  document.querySelector('#cell-override-section').style.display = '';
+}
+
+/**
+ * Restores the style of a cell to its class-based appearance.
+ * @param {number} idx
+ */
+function _restoreCellStyle(idx) {
+  if (idx === null || idx === undefined) return;
+  var layer = state.selectedCellLayer;
+  if (!layer) return;
+
+  var props = state.taskMapFC.features[idx].properties;
+  var isOverridden = state.cellOverrides[idx] !== undefined;
+
+  layer.setStyle({
+    fillColor: isOverridden ? '#FF6600' : props.color,
+    fillOpacity: isOverridden ? 0.85 : 0.7,
+    color: '#ffffff',
+    weight: 1,
+    opacity: 0.8
+  });
+
+  state.selectedCellId = null;
+  state.selectedCellLayer = null;
+}
+
+/**
+ * Applies a dosage override to the selected cell.
+ */
+export function applyCellOverride() {
+  var idx = state.selectedCellId;
+  if (idx === null || idx === undefined) {
+    toast(t('toastNoCell'), true);
+    return;
+  }
+
+  var input = document.querySelector('#cell-dose-input');
+  if (!input) return;
+  var val = parseFloat(input.value);
+  if (isNaN(val) || val < 0) return;
+
+  state.cellOverrides[idx] = val;
+
+  // Update feature properties
+  var feature = state.taskMapFC.features[idx];
+  feature.properties.dose = val;
+  feature.properties.overridden = true;
+  feature.properties.overrideColor = '#FF6600';
+
+  // Update layer styling
+  if (state.selectedCellLayer) {
+    state.selectedCellLayer.setStyle({
+      fillColor: '#FF6600',
+      fillOpacity: 0.85,
+      color: '#fff',
+      weight: 2
+    });
+  }
+
+  // Refresh the grid layer styles for all overridden cells
+  if (state.gridLayer) {
+    state.gridLayer.eachLayer(function (layer) {
+      if (!layer.feature) return;
+      var fi = state.taskMapFC.features.indexOf(layer.feature);
+      if (fi >= 0 && state.cellOverrides[fi] !== undefined) {
+        layer.setStyle({
+          fillColor: '#FF6600',
+          fillOpacity: 0.85,
+          color: '#fff',
+          weight: 2
+        });
+      }
+    });
+  }
+
+  var unitShort = state.unit ? state.unit.split('/')[0] : '';
+  toast(tf('toastCellOverride', val, unitShort));
+  renderExportStats();
+}
+
+/**
+ * Clears the dosage override for the selected cell, reverting to class default.
+ */
+export function clearCellOverride() {
+  var idx = state.selectedCellId;
+  if (idx === null || idx === undefined) {
+    toast(t('toastNoCell'), true);
+    return;
+  }
+
+  delete state.cellOverrides[idx];
+
+  // Recompute feature properties from class
+  var feature = state.taskMapFC.features[idx];
+  var ndviVal = feature.properties.ndvi;
+  var cls = classifyNDVI(ndviVal);
+  feature.properties.dose = cls.rate;
+  feature.properties['class'] = cls.name;
+  feature.properties.color = cls.color;
+  delete feature.properties.overridden;
+  delete feature.properties.overrideColor;
+
+  // Restore style
+  if (state.selectedCellLayer) {
+    state.selectedCellLayer.setStyle({
+      fillColor: cls.color,
+      fillOpacity: 0.7,
+      color: '#ffffff',
+      weight: 1
+    });
+  }
+
+  // Also restore any other cell that had overrides
+  if (state.gridLayer) {
+    state.gridLayer.eachLayer(function (layer) {
+      if (!layer.feature) return;
+      var fi = state.taskMapFC.features.indexOf(layer.feature);
+      if (fi >= 0 && state.cellOverrides[fi] === undefined) {
+        var fProps = layer.feature.properties;
+        if (fProps.overridden) {
+          delete fProps.overridden;
+          delete fProps.overrideColor;
+        }
+        layer.setStyle({
+          fillColor: fProps.color,
+          fillOpacity: 0.7,
+          color: '#ffffff',
+          weight: 1
+        });
+      }
+    });
+  }
+
+  toast(t('toastCellCleared'));
+  renderExportStats();
+}
+
+// ==========================================
+// WIRE UP CELL OVERRIDE UI
+// ==========================================
+
+var applyCellBtn = document.querySelector('#apply-cell-override-btn');
+if (applyCellBtn) {
+  applyCellBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    applyCellOverride();
+  });
+}
+
+var clearCellBtn = document.querySelector('#clear-cell-override-btn');
+if (clearCellBtn) {
+  clearCellBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    clearCellOverride();
+  });
+}
+
+// Update unit label in cell editor when unit changes
+var unitSelectCell = document.querySelector('#unit-select');
+if (unitSelectCell) {
+  unitSelectCell.addEventListener('change', function () {
+    var label = document.querySelector('#co-unit-label');
+    if (label) label.textContent = state.unit ? state.unit.split('/')[0] : '';
+  });
+}
+
+

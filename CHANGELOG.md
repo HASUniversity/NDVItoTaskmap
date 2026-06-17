@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Mirror & instructies
+- Project gespiegeld naar `D:\GIT\NDVItoTaskmap` met Robocopy-script.
+- `copilot-instructions.md` toegevoegd met verplichte stappen bij elke wijziging:
+  README bijwerken, CHANGELOG bijwerken, sync naar mirror.
+- `CHANGELOG.md` aangemaakt in de bron (was alleen in mirror aanwezig).
+
 ### Wizard-navigatie & UX
 - Stappen worden nu getoond met een **progress indicator** (6 stappen: Laden → Index → Percelen → Analyse → Kaart → Export).
 - **Volgende/Vorige** knoppen onderaan elke stap voor lineaire doorloop.

@@ -23,6 +23,8 @@ const { t, tf } = window;
 
 // Tracks the in-flight WFS request so a newer map move can cancel it.
 let _brpAbortController = null;
+// Holds the debounced moveend handler so we can remove it on reset.
+let _brpMoveHandler = null;
 
 /**
  * Returns true when features `a` and `b` refer to the same parcel.
@@ -69,7 +71,25 @@ function _wfsBody(filterXml, count) {
  */
 export function startBRPLoading() {
   loadBRP();
-  map.on('moveend', debounce(loadBRP, 600));
+  if (_brpMoveHandler) map.off('moveend', _brpMoveHandler);
+  _brpMoveHandler = debounce(loadBRP, 600);
+  map.on('moveend', _brpMoveHandler);
+}
+
+/**
+ * Stops the BRP loading loop: aborts any in-flight request and removes
+ * the map moveend listener.  Called during app reset when a new GeoTIFF
+ * is loaded to prevent stale BRP requests from continuing.
+ */
+export function stopBRPLoading() {
+  if (_brpAbortController) { _brpAbortController.abort(); _brpAbortController = null; }
+  if (_brpMoveHandler) {
+    map.off('moveend', _brpMoveHandler);
+    _brpMoveHandler = null;
+  }
+  state.brpLoading = false;
+  const hint = document.querySelector('#parcel-hint');
+  if (hint) hint.classList.add('hidden');
 }
 
 async function loadBRP() {
@@ -86,6 +106,7 @@ async function loadBRP() {
   const hint = document.querySelector('#parcel-hint');
   if (hint) hint.textContent = t('parcelHintLoading');
   state.brpLoading = true;
+  let brpTimedOut = false;
 
   try {
     const b = map.getBounds();
@@ -103,12 +124,16 @@ async function loadBRP() {
       500
     );
 
+    // Timeout na 20 seconden zodat de app niet blijft hangen
+    const brpTimeout = setTimeout(function () { brpTimedOut = true; _brpAbortController.abort(); }, 20000);
+
     const resp = await fetch(BRP_WFS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/xml;charset=UTF-8' },
       body,
       signal,
     });
+    clearTimeout(brpTimeout);
     if (!resp.ok) throw new Error('WFS ' + resp.status);
 
     const data = await resp.json();
@@ -146,7 +171,13 @@ async function loadBRP() {
     // Keep selection overlay on top after BRP re-render
     if (state.selectedParcels.length > 0) selectionOverlay.bringToFront();
   } catch (err) {
-    if (err.name === 'AbortError') return; // superseded by a newer request
+    if (err.name === 'AbortError') {
+      if (brpTimedOut) {
+        const hint = document.querySelector('#parcel-hint');
+        if (hint) hint.textContent = t('parcelHintTimeout');
+      }
+      return; // superseded by a newer request, OR timeout
+    }
     console.error('BRP laden mislukt:', err);
     const hint = document.querySelector('#parcel-hint');
     if (hint) hint.textContent = t('parcelHintFailed');
@@ -208,7 +239,7 @@ export function toggleParcel(feature) {
  * the map to the selected parcel bounds.
  * @param {boolean} fitBounds - Whether to fit the map view to the selection.
  */
-export function updateSelectionDisplay(fitBounds) {
+export async function updateSelectionDisplay(fitBounds) {
   selectionOverlay.clearLayers();
 
   // AHN and Bodemkaart are full-viewport WMS layers, no need to refresh
@@ -216,13 +247,14 @@ export function updateSelectionDisplay(fitBounds) {
   if (state.selectedParcels.length === 0) {
     document.querySelector('#parcel-info').classList.add('hidden');
     clearLegendCrop();
-    if (state.ndviGrid && state.georaster) clipNDVIToParcel(null);
+    if (state.ndviGrid && state.georaster) await clipNDVIToParcel(null);
     updateLayerVisibility();
     return;
   }
 
   const fc = { type: 'FeatureCollection', features: state.selectedParcels };
   state.selectedParcelsLayer = L.geoJSON(fc, {
+    className: 'selection-path',
     style: { color: '#0066FF', weight: 5, fillOpacity: 0, interactive: false }
   }).addTo(selectionOverlay);
   selectionOverlay.bringToFront();
@@ -240,7 +272,7 @@ export function updateSelectionDisplay(fitBounds) {
   if (listEl) {
     listEl.innerHTML = state.selectedParcels.map((f, i) => {
       const props = f.properties || {};
-      const name = props.gewas || props.gewasgroep || props.GWS_GEWAS || tf('parcelN', i + 1);
+      const name = props.name || props.gewas || props.gewasgroep || props.GWS_GEWAS || tf('parcelN', i + 1);
       let area = '?';
       try { area = (turf.area(f) / 10000).toFixed(2) + ' ha'; } catch (e) {}
       return '<div class="parcel-hist-item">' +
@@ -258,14 +290,23 @@ export function updateSelectionDisplay(fitBounds) {
         updateSelectionDisplay(false);
       });
     });
-    state.selectedParcels.forEach((parcel, i) => loadParcelHistory(parcel, i));
+    // Skip BRP crop history for manually drawn/uploaded fields
+    state.selectedParcels.forEach(function(parcel, i) {
+      var src = parcel.properties && parcel.properties.source;
+      if (src === 'manual' || src === 'upload') {
+        var histEl = document.getElementById('phi-hist-' + i);
+        if (histEl) histEl.innerHTML = '<span class="phi-none">' + t('cropHistNA') + '</span>';
+      } else {
+        loadParcelHistory(parcel, i);
+      }
+    });
   }
 
   document.querySelector('#parcel-info').classList.remove('hidden');
   // Auto-advance to Data Analyse (step 4) when parcels are selected.
   if (state.ndviGrid && state.georaster) {
     console.log('[Selection] Calling clipNDVIToParcel' + (state.classificationMethod !== 'manual' ? ' + autoClassifyFromData' : ''));
-    clipNDVIToParcel(state.selectedParcels);
+    await clipNDVIToParcel(state.selectedParcels);
     if (state.classificationMethod !== 'manual') {
       autoClassifyFromData();
     }
@@ -289,6 +330,8 @@ export function updateSelectionDisplay(fitBounds) {
 // performs a point-query WFS request so users can still select
 // parcels by clicking the map when the layer hasn't pre-loaded.
 map.on('click', async function (e) {
+  // Skip during drawing mode
+  if (state.drawMode) return;
   if (state.currentStep < 2 || !state.georaster) return;
   if (map.getZoom() < MIN_ZOOM_BRP) return;
   if (state.brpLayer && state.brpGeoJSON && state.brpGeoJSON.features && state.brpGeoJSON.features.length > 0) return;
@@ -313,6 +356,7 @@ const clearParcelsBtn = document.querySelector('#clear-parcels-btn');
 if (clearParcelsBtn) {
   clearParcelsBtn.addEventListener('click', function () {
     state.selectedParcels = [];
+    state.manualFields = [];
     refreshBRPLayerStyles();
     updateSelectionDisplay(false);
     toast(t('toastSelectionCleared'));
@@ -396,4 +440,287 @@ async function loadParcelHistory(feature, idx) {
     const el = document.getElementById('phi-hist-' + idx);
     if (el) el.innerHTML = '<span class="phi-error">' + t('cropHistNA') + '</span>';
   }
+}
+
+// ==========================================
+// MANUAL FIELD DRAWING (worldwide)
+// ==========================================
+
+/**
+ * @typedef {'polygon'|'rectangle'} DrawMode
+ */
+
+let _drawType = 'polygon';
+let _drawPoints = [];
+let _drawGuidance = null;   // Leaflet polyline/rectangle preview
+let _drawMarker = null;     // small circle marker for start point
+let _drawingActive = false;
+
+/** Updates the draw status text in the sidebar. */
+function _setDrawStatus(msgKey) {
+  var el = document.getElementById('draw-status-text');
+  if (el) el.textContent = t(msgKey);
+}
+
+/** Shows/hides the draw status bar. */
+function _showDrawStatus(show) {
+  var el = document.getElementById('draw-status');
+  if (el) { el.style.display = show ? 'flex' : 'none'; }
+}
+
+/**
+ * Enters drawing mode. Clicks on the map add vertices.
+ * @param {DrawMode} mode - 'polygon' or 'rectangle'
+ */
+export function startDrawing(mode) {
+  if (state.drawMode) stopDrawing();
+  state.drawMode = true;
+  _drawType = mode || 'polygon';
+  _drawPoints = [];
+  _drawingActive = true;
+
+  _showDrawStatus(true);
+  _setDrawStatus('drawClickFirst');
+
+  // Disable parcel click interaction during drawing
+  if (state.brpLayer) {
+    Object.values(state.brpLayerMap).forEach(function (entry) {
+      if (entry.layer) entry.layer.off('click');
+    });
+  }
+
+  toast(t('toastDrawStarted'));
+
+  // Add the map click handler
+  map.on('click', _onDrawClick);
+  map.on('dblclick', _onDrawDblClick);
+
+  // Change cursor style
+  map.getContainer().style.cursor = 'crosshair';
+}
+
+/**
+ * Exits drawing mode without saving.
+ */
+export function stopDrawing() {
+  state.drawMode = false;
+  _drawingActive = false;
+  _drawPoints = [];
+
+  // Remove preview graphics
+  if (_drawGuidance) { map.removeLayer(_drawGuidance); _drawGuidance = null; }
+  if (_drawMarker) { map.removeLayer(_drawMarker); _drawMarker = null; }
+
+  _showDrawStatus(false);
+  map.off('click', _onDrawClick);
+  map.off('dblclick', _onDrawDblClick);
+  map.getContainer().style.cursor = '';
+
+  // Re-enable parcel interactions
+  if (state.brpLayer && state.brpLayerMap) {
+    Object.values(state.brpLayerMap).forEach(function (entry) {
+      if (!entry.layer) return;
+      entry.layer.on('click', function (ev) {
+        L.DomEvent.stopPropagation(ev);
+        toggleParcel(entry.feature);
+      });
+    });
+  }
+}
+
+/**
+ * Handles click events during drawing: adds a vertex and updates the preview.
+ */
+function _onDrawClick(e) {
+  if (!_drawingActive) return;
+  var latlng = e.latlng;
+  var pt = [latlng.lat, latlng.lng];
+
+  if (_drawType === 'rectangle') {
+    if (_drawPoints.length === 0) {
+      _drawPoints.push(pt);
+      _setDrawStatus('drawClickNext');
+    } else if (_drawPoints.length === 1) {
+      _drawPoints.push(pt);
+      _finishDraw();
+    }
+    return;
+  }
+
+  // Polygon mode
+  _drawPoints.push(pt);
+
+  // Update preview
+  if (_drawGuidance) map.removeLayer(_drawGuidance);
+  if (_drawPoints.length > 1) {
+    _drawGuidance = L.polyline(_drawPoints, {
+      color: '#0066FF', weight: 3, opacity: 0.8, dashArray: '6,4'
+    }).addTo(map);
+  }
+
+  // Show marker at first point as close-target
+  if (_drawPoints.length === 1) {
+    _drawMarker = L.circleMarker(latlng, {
+      radius: 8, color: '#0066FF', fillColor: '#fff', fillOpacity: 0.8, weight: 3
+    }).addTo(map);
+    _drawMarker.bindTooltip(t('drawFinish'), { permanent: true, direction: 'top', offset: [0, -10] });
+  }
+
+  _setDrawStatus('drawClickNext');
+
+  // Auto-finish if clicked close to the start point (within 15px)
+  if (_drawPoints.length > 2) {
+    var startPx = map.latLngToContainerPoint(L.latLng(_drawPoints[0][0], _drawPoints[0][1]));
+    var curPx = map.latLngToContainerPoint(L.latLng(pt[0], pt[1]));
+    var dist = startPx.distanceTo(curPx);
+    if (dist < 15) { _finishDraw(); }
+  }
+}
+
+/**
+ * Finishes the polygon on double-click.
+ */
+function _onDrawDblClick(e) {
+  if (!_drawingActive || _drawType !== 'polygon') return;
+  // Remove the last point if it's close to the previous (double-click artefact)
+  if (_drawPoints.length > 2) {
+    _finishDraw();
+  }
+}
+
+/**
+ * Completes the drawing and creates a GeoJSON feature.
+ */
+function _finishDraw() {
+  if (!_drawingActive) return;
+  if (_drawPoints.length < (_drawType === 'rectangle' ? 2 : 3)) {
+    toast('Need at least ' + (_drawType === 'rectangle' ? '2 clicks' : '3 points'), true);
+    return;
+  }
+
+  var coordinates;
+  if (_drawType === 'rectangle') {
+    // Create a rectangle from two corner points
+    var p1 = _drawPoints[0], p2 = _drawPoints[1];
+    coordinates = [[
+      [p1[1], p1[0]],
+      [p2[1], p1[0]],
+      [p2[1], p2[0]],
+      [p1[1], p2[0]],
+      [p1[1], p1[0]]
+    ]];
+  } else {
+    // Close the polygon ring
+    var ring = _drawPoints.map(function (p) { return [p[1], p[0]]; });
+    ring.push(ring[0]); // close ring
+    coordinates = [ring];
+  }
+
+  var feature = {
+    type: 'Feature',
+    id: 'manual_' + Date.now(),
+    geometry: {
+      type: 'Polygon',
+      coordinates: coordinates
+    },
+    properties: {
+      source: 'manual',
+      name: t('parcelN', (state.manualFields.length + 1))
+    }
+  };
+
+  stopDrawing();
+  state.manualFields.push(feature);
+
+  // Add to selection
+  toggleParcel(feature);
+
+  toast(tf('toastDrawComplete', _drawPoints.length));
+}
+
+// ==========================================
+// DRAW UI BUTTONS
+// ==========================================
+
+var drawPolygonBtn = document.querySelector('#draw-polygon-btn');
+if (drawPolygonBtn) {
+  drawPolygonBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (state.drawMode) { stopDrawing(); return; }
+    startDrawing('polygon');
+  });
+}
+
+var drawRectBtn = document.querySelector('#draw-rect-btn');
+if (drawRectBtn) {
+  drawRectBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (state.drawMode) { stopDrawing(); return; }
+    startDrawing('rectangle');
+  });
+}
+
+var cancelDrawBtn = document.querySelector('#cancel-draw-btn');
+if (cancelDrawBtn) {
+  cancelDrawBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    stopDrawing();
+    toast(t('toastDrawCancelled'));
+  });
+}
+
+// ==========================================
+// GEOJSON UPLOAD
+// ==========================================
+
+var geojsonInput = document.querySelector('#geojson-file-input');
+var uploadBtn = document.querySelector('#upload-geojson-btn');
+
+if (uploadBtn) {
+  uploadBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (geojsonInput) geojsonInput.click();
+  });
+}
+
+if (geojsonInput) {
+  geojsonInput.addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function (ev) {
+      try {
+        var data = JSON.parse(ev.target.result);
+        var features = [];
+        if (data.type === 'FeatureCollection') {
+          features = data.features;
+        } else if (data.type === 'Feature') {
+          features = [data];
+        } else {
+          toast(tf('toastGeoJSONError', 'Ongeldige GeoJSON structuur'), true);
+          return;
+        }
+
+        features.forEach(function (f) {
+          // Only accept Polygon / MultiPolygon
+          if (!f.geometry || !f.geometry.type) return;
+          var type = f.geometry.type;
+          if (type !== 'Polygon' && type !== 'MultiPolygon') return;
+          f.id = f.id || 'upload_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+          if (!f.properties) f.properties = {};
+          f.properties.source = 'upload';
+          if (!f.properties.name) f.properties.name = t('parcelN', (state.manualFields.length + 1));
+          state.manualFields.push(f);
+          toggleParcel(f);
+        });
+
+        toast(tf('toastGeoJSONLoaded', features.length));
+      } catch (err) {
+        toast(tf('toastGeoJSONError', err.message), true);
+      }
+    };
+    reader.readAsText(file);
+    // Reset so the same file can be re-uploaded
+    geojsonInput.value = '';
+  });
 }

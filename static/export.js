@@ -14,8 +14,10 @@
    the code self-contained and dependency-free.
    =================================================== */
 
-import { state } from './state.js?v=1';
+import { state, VEGETATION_INDICES } from './state.js?v=1';
 import { toast, escapeHtml, escapeXml, showLoading, hideLoading } from './utils.js?v=1';
+import { map, gridOverlay, brpOverlay } from './map.js?v=1';
+import { getGeoBounds } from './ndvi.js?v=1';
 
 const { t, tf } = window;
 
@@ -98,6 +100,422 @@ if (exportIsoxmlBtn) {
         toast(tf('toastISOXMLError', err.message), true);
       }
     }, 50);
+  });
+}
+
+// ==========================================
+// PDF EXPORT — Map screenshot + legend + logo
+//
+// Uses a custom pane-based canvas compositor instead of
+// html2canvas, because html2canvas does NOT reliably handle
+// Leaflet's z-index pane stacking (tilePane → ndviPane →
+// overlayPane).  The new approach captures each Leaflet pane
+// separately and composites them in the correct visual order.
+// ==========================================
+
+// ── Image loader (CORS-aware) ──
+function _loadImage(src) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image();
+    // Data URIs (NDVI overlay, SVG) do NOT need CORS
+    if (src.indexOf('data:') !== 0) img.crossOrigin = 'anonymous';
+    img.onload = function () { resolve(img); };
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// ── Read the CSS transform offset from a pane (translate3d dx, dy) ──
+function _getPaneOffset(paneEl) {
+  var dx = 0, dy = 0;
+  if (!paneEl) return { dx: dx, dy: dy };
+  var tr = window.getComputedStyle(paneEl).transform;
+  if (tr && tr !== 'none') {
+    var m = tr.match(/matrix\(([^)]+)\)/);
+    if (m) {
+      var parts = m[1].split(',').map(parseFloat);
+      dx = parts[4] || 0;
+      dy = parts[5] || 0;
+    }
+  }
+  return { dx: dx, dy: dy };
+}
+
+// ── Render Leaflet vector paths (SVG) onto the canvas ──
+//
+// Leaflet renders vector layers as SVG <path> elements inside a pane.
+// The SVG element sits inside overlayPane (or ndviPane), which is a
+// child of mapPane.  The map container has position (mapRect.left,
+// mapRect.top).  The mapPane has a CSS transform for the pan offset.
+//
+// The SVG's viewBox + internal CSS transform (set by the SVG renderer)
+// are designed so that a path at SVG coordinate (x, y) corresponds to
+// container-pixel (x, y).  The total screen position is therefore:
+//   screenX = mapRect.left + mapPaneTransformX + paneTransformX + x
+//
+// Since the tile images are positioned using getBoundingClientRect()
+// (which includes ALL ancestor transforms), their canvas position is:
+//   tileScreenX - mapRect.left = mapPaneTransformX + paneTransformX + tileSVGCoordX
+//
+// This function reads BOTH the mapPane and pane CSS transforms to
+// compute the correct offset for path coordinates.
+function _renderPanePaths(ctx, paneName) {
+  var pane = map.getPane(paneName);
+  if (!pane) return;
+  var svgEl = pane.querySelector('svg');
+  if (!svgEl) return;
+
+  // Collect all paths
+  var elements = svgEl.querySelectorAll('path');
+
+  // Compute the cumulative CSS transform offset from mapPane + this pane.
+  // The map container's top-left is our canvas origin (0,0).
+  var mapPaneEl = map.getPane('mapPane');
+  var mapOff = _getPaneOffset(mapPaneEl);
+  var paneOff = _getPaneOffset(pane);
+  var totalDx = mapOff.dx + paneOff.dx;
+  var totalDy = mapOff.dy + paneOff.dy;
+
+  for (var ei = 0; ei < elements.length; ei++) {
+    var el = elements[ei];
+    var d = el.getAttribute('d');
+    if (!d) continue;
+
+    // Skip the selection-path (blue selection outline)
+    if (el.classList && el.classList.contains('selection-path')) continue;
+
+    var path;
+    try { path = new Path2D(d); } catch (e) { continue; }
+
+    ctx.save();
+    ctx.translate(totalDx, totalDy);
+
+    // ── Fill ──
+    var fill = el.getAttribute('fill');
+    if (fill && fill !== 'none') {
+      ctx.fillStyle = fill;
+      var fillOpacity = el.getAttribute('fill-opacity');
+      if (fillOpacity !== null) ctx.globalAlpha = parseFloat(fillOpacity);
+      ctx.fill(path);
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Stroke ──
+    var stroke = el.getAttribute('stroke');
+    if (stroke && stroke !== 'none') {
+      ctx.strokeStyle = stroke;
+      var sw = el.getAttribute('stroke-width');
+      ctx.lineWidth = sw ? parseFloat(sw) : 1;
+      var so = el.getAttribute('stroke-opacity');
+      if (so !== null) ctx.globalAlpha = parseFloat(so);
+      var da = el.getAttribute('stroke-dasharray');
+      if (da) ctx.setLineDash(da.split(',').map(parseFloat));
+      ctx.stroke(path);
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.restore();
+  }
+}
+
+// ── Capture each Leaflet pane at the correct z-order ──
+//
+// Leaflet organises layers in stacked <div> panes:
+//   tilePane     z-index 200   — basemap tiles
+//   ndviPane     z-index 399   — NDVI / VI image overlay + contour path
+//   overlayPane  z-index 400   — vector layers (BRP parcels, grid, selection)
+//
+// This function composites them by rendering each pane's DOM
+// content onto a single canvas — guaranteeing the correct order.
+async function _captureMapToCanvas(map, scale) {
+  var container = map.getContainer();
+  var mapRect   = container.getBoundingClientRect();
+  var size      = map.getSize();
+
+  var canvas = document.createElement('canvas');
+  canvas.width  = size.x * scale;
+  canvas.height = size.y * scale;
+  var ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+
+  // Helper: bounding rect of `el` relative to the map container
+  function _elRect(el) {
+    var r = el.getBoundingClientRect();
+    return { x: r.left - mapRect.left, y: r.top - mapRect.top, w: r.width, h: r.height };
+  }
+
+  // ── Render all <img> elements inside a pane ──
+  async function _renderPaneImages(paneName) {
+    var pane = map.getPane(paneName);
+    if (!pane) return;
+    var imgs = pane.querySelectorAll('img');
+    var tasks = [];
+    for (var ii = 0; ii < imgs.length; ii++) {
+      var img = imgs[ii];
+      if (!img.complete || img.naturalWidth === 0) continue;
+      var src = img.currentSrc || img.src;
+      if (!src) continue;
+      var pos = _elRect(img);
+      if (pos.w === 0 || pos.h === 0) continue;
+      tasks.push(
+        (function (s, p) {
+          return _loadImage(s).then(function (loaded) {
+            ctx.drawImage(loaded, p.x, p.y, p.w, p.h);
+          });
+        })(src, pos).catch(function () { /* skip CORS failures */ })
+      );
+    }
+    await Promise.all(tasks);
+  }
+
+  // Compose layers from bottom to top:
+  await _renderPaneImages('tilePane');    // Basemap tiles     (z 200)
+  await _renderPaneImages('ndviPane');    // NDVI / VI overlay  (z 399)
+  // Vector paths found in the ndviPane (contour line with pane:'ndviPane')
+  _renderPanePaths(ctx, 'ndviPane');
+  // Vector paths in the overlayPane (BRP, grid, selection)  (z 400)
+  _renderPanePaths(ctx, 'overlayPane');
+
+  return canvas;
+}
+
+const exportPdfBtn = document.querySelector('#export-pdf-btn');
+if (exportPdfBtn) {
+  exportPdfBtn.addEventListener('click', async function () {
+    if (!state.taskMapFC) { toast(t('toastGenerateFirst'), true); return; }
+
+    try {
+      showLoading(t('loadingPDF'));
+      await new Promise(function (r) { setTimeout(r, 100); });
+
+      var name = exportNameInput.value || _defaultName('taskmap');
+      var savedCenter = map.getCenter();
+      var savedZoom   = map.getZoom();
+
+      // ── Centreer de kaart op het veld ──
+      try {
+        if (state.selectedParcels && state.selectedParcels.length > 0) {
+          var fieldBounds = L.geoJSON({
+            type: 'FeatureCollection', features: state.selectedParcels
+          }).getBounds();
+          map.fitBounds(fieldBounds, { padding: [30, 30] });
+        } else if (state.georaster) {
+          map.fitBounds(getGeoBounds(), { padding: [30, 30] });
+        }
+      } catch (e) { /* ignore fitBounds errors */ }
+
+      map.invalidateSize();
+
+      // ── Wacht tot alle tegels geladen zijn ──
+      await new Promise(function (resolve) {
+        var tilePane = map._panes && map._panes.tilePane;
+        if (!tilePane) { resolve(); return; }
+        var unloaded = tilePane.querySelectorAll('.leaflet-tile:not(.leaflet-tile-loaded)');
+        if (unloaded.length === 0) { resolve(); return; }
+        var done = false;
+        map.once('tileload', function () { if (!done) { done = true; resolve(); } });
+        setTimeout(function () { if (!done) { done = true; resolve(); } }, 5000);
+      });
+      await new Promise(function (r) { setTimeout(r, 400); });
+
+      // ── Capture the map — pane by pane, correct z-order ──
+      var canvas = await _captureMapToCanvas(map, 2);
+
+      // ── Restore map view ──
+      try { map.setView(savedCenter, savedZoom); } catch (e) {}
+
+      // ── Convert canvas to JPEG data-URI ──
+      var imgData = await new Promise(function (resolve) {
+        canvas.toBlob(function (blob) {
+          var reader = new FileReader();
+          reader.onload = function () { resolve(reader.result); };
+          reader.readAsDataURL(blob);
+        }, 'image/jpeg', 0.92);
+      });
+
+      var imgW = canvas.width;
+      var imgH = canvas.height;
+
+      // ── Build PDF (A4 landscape) ──
+      // Guard: ensure jsPDF library is loaded
+      if (!window.jspdf || !window.jspdf.jsPDF) {
+        throw new Error('jsPDF library niet geladen — controleer je internetverbinding');
+      }
+      var pdf = new window.jspdf.jsPDF('landscape', 'mm', 'a4');
+      var pageW = pdf.internal.pageSize.getWidth();   // 297 mm
+      var pageH = pdf.internal.pageSize.getHeight();  // 210 mm
+      var margin = 14;
+      var usableW = pageW - 2 * margin;               // 269 mm
+
+      // ── Header with vector logo ──
+      var curY = margin;
+      var logoX = margin;
+      var logoSize = 9; // mm
+
+      // Draw a simple stylised crop/leaf logo (no emojis — jsPDF lacks emoji support)
+      function drawLogo(x, y, size) {
+        var s = size;
+        pdf.setDrawColor(0);
+        pdf.setLineWidth(0.6);
+        // Stem
+        pdf.line(x + s * 0.45, y + s, x + s * 0.45, y + s * 0.2);
+        // Leaf shape (two ellipses)
+        pdf.setFillColor(46, 125, 50); // var(--primary)
+        pdf.ellipse(x + s * 0.32, y + s * 0.45, s * 0.22, s * 0.35, 'F');
+        pdf.setFillColor(76, 175, 80); // var(--primary-light)
+        pdf.ellipse(x + s * 0.68, y + s * 0.48, s * 0.20, s * 0.30, 'F');
+        // Veins
+        pdf.setDrawColor(255, 255, 255);
+        pdf.setLineWidth(0.2);
+        pdf.line(x + s * 0.45, y + s * 0.3, x + s * 0.20, y + s * 0.15);
+        pdf.line(x + s * 0.45, y + s * 0.4, x + s * 0.70, y + s * 0.25);
+      }
+      drawLogo(logoX, curY, logoSize);
+
+      pdf.setFontSize(16);
+      pdf.setFont(undefined, 'bold');
+      pdf.setTextColor(0);
+      pdf.text(t('pdfTitle'), logoX + logoSize + 3, curY + 6);
+
+      pdf.setFontSize(9);
+      pdf.setFont(undefined, 'normal');
+      pdf.setTextColor(100);
+      pdf.text(t('pdfSubtitle'), logoX + logoSize + 3, curY + 11);
+
+      // Subtitle — right-aligned: date
+      var dateStr = new Date().toLocaleDateString('nl-NL');
+      pdf.text(dateStr, pageW - margin, curY + 6, { align: 'right' });
+
+      // Separator line
+      curY += 16;
+      pdf.setDrawColor(200);
+      pdf.setLineWidth(0.3);
+      pdf.line(margin, curY, pageW - margin, curY);
+
+      // ── Map image (full width) + Legend (onder de kaart) ──
+      var mapTopY = curY + 4;
+      var footerY = pageH - margin - 2;
+      var mapRatio = imgW / imgH;
+      var classes = state.classes || [];
+      var rowH = 4; // mm per legend row
+
+      // Calculate legend height
+      var legendH = 0;
+      if (classes.length > 0) {
+        legendH = 10 + classes.length * rowH; // title + header + rows
+      }
+
+      // Map: full width, shrink if needed to leave room for legend + footer
+      var gap = 5;
+      var mapW = usableW;
+      var mapH = mapW / mapRatio;
+      var availableH = footerY - mapTopY;
+      var neededH = mapH + gap + legendH;
+      if (neededH > availableH) {
+        var newMapH = availableH - gap - legendH;
+        if (newMapH > 30) { // minimum 30mm map height
+          mapH = newMapH;
+          mapW = mapH * mapRatio;
+        }
+      }
+      var mapX = margin;
+
+      // Border around map
+      pdf.setDrawColor(160);
+      pdf.setLineWidth(0.4);
+      pdf.rect(mapX - 0.5, mapTopY - 0.5, mapW + 1, mapH + 1);
+
+      // Insert map screenshot
+      pdf.addImage(imgData, 'JPEG', mapX, mapTopY, mapW, mapH);
+
+      // ── Legend area (onder de kaart) ──
+      if (classes.length > 0) {
+        var legY = mapTopY + mapH + gap;
+
+        pdf.setFontSize(7.5);
+        pdf.setFont(undefined, 'bold');
+        pdf.setTextColor(60);
+        pdf.text(t('pdfLegend'), margin, legY);
+        legY += 4.5;
+
+        // Kolommen over volledige breedte
+        var cols = [
+          { x: margin, w: 6 },                           // kleurstaal
+          { x: margin + 8, w: 70 },                      // klassenaam
+          { x: margin + 82, w: 60 },                     // NDVI-bereik
+          { x: margin + 146, w: 50 },                    // dosering
+          { x: margin + 200, w: usableW - 200 },         // eenheid
+        ];
+        var headerRow = ['', t('clsName'), t('pdfNDVIRange'), t('pdfRate'), t('clsDose')];
+
+        // Table header
+        pdf.setFont(undefined, 'bold');
+        pdf.setTextColor(120);
+        pdf.setFontSize(6);
+        headerRow.forEach(function (h, i) {
+          if (i === 0) return;
+          pdf.text(h, cols[i].x, legY, { maxWidth: cols[i].w });
+        });
+        legY += 3;
+
+        // Table rows (all classes fit since we're at full width)
+        classes.forEach(function (cls, idx) {
+          var y = legY + idx * rowH;
+
+          // Color swatch (gevulde rechthoek)
+          pdf.setFillColor(
+            parseInt(cls.color.slice(1, 3), 16),
+            parseInt(cls.color.slice(3, 5), 16),
+            parseInt(cls.color.slice(5, 7), 16)
+          );
+          pdf.rect(cols[0].x, y - 1, 5, rowH - 1, 'F');
+          pdf.setDrawColor(180);
+          pdf.setLineWidth(0.1);
+          pdf.rect(cols[0].x, y - 1, 5, rowH - 1, 'S');
+
+          // Class data
+          pdf.setFont(undefined, 'normal');
+          pdf.setTextColor(30);
+          pdf.setFontSize(6);
+          pdf.text(cls.name, cols[1].x, y + 1.5, { maxWidth: cols[1].w });
+          pdf.text(cls.min.toFixed(2) + ' - ' + cls.max.toFixed(2), cols[2].x, y + 1.5, { maxWidth: cols[2].w });
+          pdf.text(String(cls.rate), cols[3].x, y + 1.5, { maxWidth: cols[3].w });
+          pdf.text(state.unit || 'kg/ha', cols[4].x, y + 1.5, { maxWidth: cols[4].w });
+        });
+      }
+
+      // ── Footer metadata ──
+      var footerParts = [];
+      if (state.sourceFileName) {
+        footerParts.push(state.sourceFileName.replace(/\.[^.]+$/, ''));
+      }
+      footerParts.push(state.gridSize + ' m grid');
+      if (state.taskMapFC && state.taskMapFC.features) {
+        footerParts.push(state.taskMapFC.features.length + ' cellen');
+        var totalArea = 0;
+        state.taskMapFC.features.forEach(function (f) {
+          if (f.geometry) { try { totalArea += turf.area(f); } catch (e) {} }
+        });
+        footerParts.push((totalArea / 10000).toFixed(1) + ' ha');
+      }
+      footerParts.push(state.unit || 'kg/ha');
+
+      pdf.setFontSize(6);
+      pdf.setFont(undefined, 'normal');
+      pdf.setTextColor(140);
+      pdf.text(footerParts.join('  \u00B7  '), margin, pageH - margin - 1, { maxWidth: usableW });
+
+      // ── Save ──
+      pdf.save(name + '.pdf');
+      hideLoading();
+      toast(t('toastPDFExport'));
+    } catch (err) {
+      hideLoading();
+      console.error(err);
+      // Restore map view
+      if (typeof savedCenter !== 'undefined') try { map.setView(savedCenter, savedZoom); } catch (e) {}
+      toast(tf('toastPdfExportError', err.message), true);
+    }
   });
 }
 

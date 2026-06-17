@@ -11,7 +11,7 @@
    =================================================== */
 
 import { state, VEGETATION_INDICES } from './state.js?v=1';
-import { toast } from './utils.js?v=1';
+import { toast, setLoadingDetail } from './utils.js?v=1';
 import { map, ndviOverlay, legend, showLegendInPanel, setLegendLabels } from './map.js?v=1';
 
 const { t } = window;
@@ -117,6 +117,10 @@ function computeVI(vi, nir, r, g, b, re) {
       const dr = 0.1 - r, dn = 0.06 - nir;
       const denom = dr * dr + dn * dn; if (denom === 0) return NaN;
       return 1.0 / denom;
+    }
+    case 'WDVI': {
+      // Weighted Difference Vegetation Index: NIR − a×R  (soil line a=1.2)
+      return nir - 1.2 * r;
     }
 
     // ── RGB-based indices ──
@@ -257,7 +261,59 @@ export function getGeoBounds() {
  * Results are cached in `state.ndviGrid` (Float32Array) and
  * `state.ndviHistogramData` for later use by the histogram and taskmap.
  */
-export function displayNDVI() {
+/**
+ * Helper: converts a canvas to a blob URL asynchronously, avoiding the
+ * synchronous main-thread freeze of canvas.toDataURL().
+ * Falls back to toDataURL if toBlob is unavailable.
+ * @param {HTMLCanvasElement} canvas
+ * @returns {Promise<string>} A blob: or data: URL.
+ */
+function _canvasToURL(canvas) {
+  return new Promise(function (resolve) {
+    canvas.toBlob(function (blob) {
+      if (blob) resolve(URL.createObjectURL(blob));
+      else resolve(canvas.toDataURL('image/png'));
+    }, 'image/png');
+  });
+}
+
+/**
+ * Processes raster rows in chunks, yielding to the browser after each
+ * chunk so the UI (spinner, toasts) stays responsive.
+ * @param {number} totalRows  - Total number of rows to process.
+ * @param {Function} processRow - Called with (rowIndex) for each row.
+ * @param {string} [label]    - Optional progress label (e.g. 'Pixels verwerken').
+ * @returns {Promise<void>}
+ */
+function _processRowsChunked(totalRows, processRow, label) {
+  return new Promise(function (resolve) {
+    const chunkSize = Math.max(1, Math.min(48, Math.ceil(totalRows / 24)));
+    let row = 0;
+    var t0 = performance.now();
+    function nextChunk() {
+      var t1 = performance.now();
+      // Yield every ~120 ms to keep the UI thread responsive
+      if (row > 0 && t1 - t0 > 120) {
+        t0 = t1;
+        if (label) setLoadingDetail(label + ' — ' + Math.round(row / totalRows * 100) + '%');
+        setTimeout(nextChunk, 0);
+        return;
+      }
+      const end = Math.min(row + chunkSize, totalRows);
+      for (; row < end; row++) {
+        processRow(row);
+      }
+      if (row < totalRows) {
+        setTimeout(nextChunk, 0);
+      } else {
+        resolve();
+      }
+    }
+    setTimeout(nextChunk, 0);
+  });
+}
+
+export async function displayNDVI() {
   ndviOverlay.clearLayers();
   const gr = state.georaster;
   const stretchCheck = document.querySelector('#stretch-ndvi');
@@ -274,9 +330,10 @@ export function displayNDVI() {
     proxyGrid.fill(NaN);
     const HIST_BINS_P = 100, histBinMinP = -0.2, histBinMaxP = 1.0;
     const histCountsP = new Float32Array(HIST_BINS_P);
-    for (let row = 0; row < gr.height; row++) {
-      for (let col = 0; col < gr.width; col++) {
-        const oi = row * gr.width + col;
+    await _processRowsChunked(gr.height, function (row) {
+      const w = gr.width;
+      for (let col = 0; col < w; col++) {
+        const oi = row * w + col;
         const idx = oi << 2;
         const rv = gr.values[0][row][col];
         const gv = gr.values[1][row][col];
@@ -293,13 +350,13 @@ export function displayNDVI() {
           histCountsP[Math.max(0, Math.min(HIST_BINS_P - 1, bip))]++;
         }
       }
-    }
+    }, t('loadingRender'));
     state.ndviGrid = proxyGrid;
     state.ndviHistogramData = { counts: histCountsP, min: histBinMinP, max: histBinMaxP };
     state.ndviScaleMin = histBinMinP;
     state.ndviScaleMax = histBinMaxP;
     ctx.putImageData(imgData, 0, 0);
-    state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
+    state.ndviLayer = L.imageOverlay(await _canvasToURL(canvas), getGeoBounds(), { opacity: 1, pane: 'ndviPane' });
     ndviOverlay.addLayer(state.ndviLayer);
     addContourToOverlay(ndviOverlay);
     legend.addTo(map);
@@ -329,8 +386,10 @@ export function displayNDVI() {
 
   const ndviGrid = new Float32Array(gr.width * gr.height);
   ndviGrid.fill(NaN);
-  for (let row = 0; row < gr.height; row++) {
-    for (let col = 0; col < gr.width; col++) {
+  const computeLabel = t('loadingRender');
+  await _processRowsChunked(gr.height, function (row) {
+    const w = gr.width;
+    for (let col = 0; col < w; col++) {
       if (alphaBand >= 0 && gr.values[alphaBand][row][col] === 0) continue;
       let ndvi;
       if (isP) {
@@ -338,13 +397,11 @@ export function displayNDVI() {
         if (nd(v)) continue;
         ndvi = v;
       } else {
-        // Extract band values needed for this index
         const nirVal = def && def.needsNIR && bN >= 0 ? gr.values[bN][row][col] : NaN;
         const redVal = def && def.needsRed && bR >= 0 ? gr.values[bR][row][col] : NaN;
         const grnVal = def && def.needsGreen && bG >= 0 ? gr.values[bG][row][col] : NaN;
         const bluVal = def && def.needsBlue && bB >= 0 ? gr.values[bB][row][col] : NaN;
         const redgVal = def && def.needsRedEdge && bRE >= 0 ? gr.values[bRE][row][col] : NaN;
-        // Check no-data for each used band
         if ((def && def.needsNIR && nd(nirVal)) ||
             (def && def.needsRed && nd(redVal)) ||
             (def && def.needsGreen && nd(grnVal)) ||
@@ -352,17 +409,16 @@ export function displayNDVI() {
             (def && def.needsRedEdge && nd(redgVal))) continue;
         ndvi = computeVI(vi, nirVal, redVal, grnVal, bluVal, redgVal);
         if (isNaN(ndvi)) continue;
-        // Clamp to [-1, 1] for normalized indices, skip extreme outliers for others
         if (def && def.clampRange) {
           if (ndvi < -1 || ndvi > 1) continue;
         }
       }
-      ndviGrid[row * gr.width + col] = ndvi;
+      ndviGrid[row * w + col] = ndvi;
       if (ndvi < ndviMin) ndviMin = ndvi;
       if (ndvi > ndviMax) ndviMax = ndvi;
       ndviCount++;
     }
-  }
+  }, computeLabel);
   state.ndviGrid = ndviGrid;
 
   let scaleMin = -0.2, scaleMax = 1.0;
@@ -398,16 +454,17 @@ export function displayNDVI() {
   state.ndviScaleMin = scaleMin;
   state.ndviScaleMax = scaleMax;
 
-  for (let row = 0; row < gr.height; row++) {
-    for (let col = 0; col < gr.width; col++) {
-      const ndvi = ndviGrid[row * gr.width + col];
+  await _processRowsChunked(gr.height, function (row) {
+    const w = gr.width;
+    for (let col = 0; col < w; col++) {
+      const ndvi = ndviGrid[row * w + col];
       if (isNaN(ndvi)) continue;
       const rgb = ndviToRGB(ndvi, scaleMin, scaleMax);
       if (!rgb) continue;
-      const idx = (row * gr.width + col) << 2;
+      const idx = (row * w + col) << 2;
       px[idx] = rgb.r; px[idx + 1] = rgb.g; px[idx + 2] = rgb.b; px[idx + 3] = 217;
     }
-  }
+  }, t('loadingRender'));
   ctx.putImageData(imgData, 0, 0);
 
   if (ndviCount > 0) {
@@ -429,7 +486,7 @@ export function displayNDVI() {
     toast(t('toastNoValidPixels'), true);
   }
 
-  state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
+  state.ndviLayer = L.imageOverlay(await _canvasToURL(canvas), getGeoBounds(), { opacity: 1, pane: 'ndviPane' });
   ndviOverlay.addLayer(state.ndviLayer);
   addContourToOverlay(ndviOverlay);
   legend.addTo(map);
@@ -576,6 +633,7 @@ export function addContourToOverlay(overlay) {
     const poly = L.polygon(points, {
       color: '#FF66AA', weight: 3, dashArray: '8,6',
       fill: false, interactive: false, opacity: 0.85,
+      pane: 'ndviPane',
     });
     poly._isContour = true;
     overlay.addLayer(poly);
@@ -584,6 +642,7 @@ export function addContourToOverlay(overlay) {
     const rect = L.rectangle(getGeoBounds(), {
       color: '#FF66AA', weight: 3, dashArray: '8,6',
       fill: false, interactive: false, opacity: 0.85,
+      pane: 'ndviPane',
     });
     rect._isContour = true;
     overlay.addLayer(rect);
@@ -682,7 +741,7 @@ export function drawNDVIHistogram() {
  * @param {object[]|null} parcels - Array of GeoJSON feature geometries, or
  *   null to show the full (unclipped) raster.
  */
-export function clipNDVIToParcel(parcels) {
+export async function clipNDVIToParcel(parcels) {
   const gr = state.georaster;
   const ndviGrid = state.ndviGrid;
   if (!gr || !ndviGrid) {
@@ -747,12 +806,7 @@ export function clipNDVIToParcel(parcels) {
   state.ndviMaskData = mask;
   state.ndviMaskParcels = parcels;
 
-  const vals = [];
-  for (let vi = 0; vi < ndviGrid.length; vi++) { if (mask[vi] && !isNaN(ndviGrid[vi])) vals.push(ndviGrid[vi]); }
-  if (vals.length === 0) { toast(t('toastNoValidNDVI'), 'warn'); return; }
-
-  // Use the actual data range for the histogram so autoClassifyFromData()
-  // gets meaningful bins instead of a sparse range like -0.2..1.0.
+  // Build histogram over masked area
   let clipMin = Infinity, clipMax = -Infinity;
   for (let vi = 0; vi < ndviGrid.length; vi++) {
     if (!mask[vi]) continue;
@@ -777,7 +831,7 @@ export function clipNDVIToParcel(parcels) {
     }
   }
   state.ndviHistogramData = { counts: histCounts, min: histMin, max: histMax };
-  console.log('[Clip] histogram range=' + histMin.toFixed(3) + '..' + histMax.toFixed(3) + ' totalPixels=' + vals.length);
+  console.log('[Clip] histogram range=' + histMin.toFixed(3) + '..' + histMax.toFixed(3));
 
   const canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
@@ -787,7 +841,7 @@ export function clipNDVIToParcel(parcels) {
 
   if (state.isRGBProxy) {
     const hasAlphaP = gr.numberOfRasters >= 4;
-    for (let ri = 0; ri < h; ri++) {
+    await _processRowsChunked(h, function (ri) {
       for (let ci = 0; ci < w; ci++) {
         const oi = ri * w + ci;
         if (!mask[oi]) continue;
@@ -797,9 +851,9 @@ export function clipNDVIToParcel(parcels) {
         px[pi2] = gr.values[0][ri][ci]; px[pi2 + 1] = gr.values[1][ri][ci];
         px[pi2 + 2] = gr.values[2][ri][ci]; px[pi2 + 3] = Math.round(av * 0.85);
       }
-    }
+    }, t('loadingRender'));
   } else {
-    for (let ri = 0; ri < h; ri++) {
+    await _processRowsChunked(h, function (ri) {
       for (let ci = 0; ci < w; ci++) {
         const oi = ri * w + ci;
         if (!mask[oi]) continue;
@@ -810,12 +864,12 @@ export function clipNDVIToParcel(parcels) {
         const pi2 = oi << 2;
         px[pi2] = rgb.r; px[pi2 + 1] = rgb.g; px[pi2 + 2] = rgb.b; px[pi2 + 3] = 217;
       }
-    }
+    }, t('loadingRender'));
   }
   ctx.putImageData(imgData, 0, 0);
 
   ndviOverlay.clearLayers();
-  state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
+  state.ndviLayer = L.imageOverlay(await _canvasToURL(canvas), getGeoBounds(), { opacity: 1, pane: 'ndviPane' });
   ndviOverlay.addLayer(state.ndviLayer);
   addContourToOverlay(ndviOverlay);
 
@@ -845,8 +899,10 @@ export function autoClassifyFromData() {
 }
 
 /**
- * Shared helper: reconstructs approximated data values from the histogram
- * bins (weighted by count) so that algorithms like Jenks can work on them.
+ * Shared helper: extracts valid pixel values directly from `state.ndviGrid`
+ * (a Float32Array) instead of reconstructing from histogram bins.
+ * Much faster because it avoids the nested bin-count loop and uses
+ * the actual pixel values, not bin-centre approximations.
  * Subsamples when the total pixel count exceeds `MAX_SAMPLES` to keep the
  * downstream O(k·n²) DP tractable and avoid freezing the browser.
  * @param {number} [maxSamples=2000] - Maximum number of values to generate.
@@ -854,27 +910,30 @@ export function autoClassifyFromData() {
  */
 function _histogramToValues(maxSamples) {
   if (maxSamples === undefined) maxSamples = 2000;
+  const grid = state.ndviGrid;
   const data = state.ndviHistogramData;
-  if (!data) { console.warn('[Classify] No histogram data'); return null; }
-  const counts = data.counts, n = counts.length;
-  let total = 0;
-  for (let i = 0; i < n; i++) total += counts[i];
-  if (!total) { console.warn('[Classify] Zero total counts'); return null; }
+  if (!grid || !data) { console.warn('[Classify] No ndviGrid or histogram data'); return null; }
+
+  // Extract valid values directly from the Float32Array
   const values = [];
-  // Subsample when the dataset is too large for the O(k·n²) Jenks DP
-  const step = total > maxSamples ? Math.ceil(total / maxSamples) : 1;
-  let sampleIdx = 0;
+  const n = grid.length;
   for (let i = 0; i < n; i++) {
-    if (!counts[i]) continue;
-    const binVal = data.min + (i + 0.5) / n * (data.max - data.min);
-    for (let j = 0; j < counts[i]; j++) {
-      sampleIdx++;
-      if (step > 1 && (sampleIdx % step) !== 0) continue;
-      values.push(binVal);
-    }
+    const v = grid[i];
+    if (!isNaN(v)) values.push(v);
   }
-  console.log('[HistToValues] total=' + total + ' samples=' + values.length + ' step=' + step);
-  return { sorted: values.sort((a, b) => a - b), data };
+  if (values.length === 0) { console.warn('[Classify] No valid values'); return null; }
+
+  // Subsample when the dataset is too large for the O(k·n²) Jenks DP
+  const total = values.length;
+  const step = total > maxSamples ? Math.ceil(total / maxSamples) : 1;
+  const sampled = step > 1 ? [] : values;
+  if (step > 1) {
+    for (let i = 0; i < total; i += step) sampled.push(values[i]);
+  }
+
+  sampled.sort((a, b) => a - b);
+  console.log('[Classify] ndviGrid=' + total + ' samples=' + sampled.length + ' step=' + step);
+  return { sorted: sampled, data };
 }
 
 /**
@@ -1256,7 +1315,7 @@ export function renderClassifiedNDVI() {
   ctx.putImageData(imgData, 0, 0);
 
   ndviOverlay.clearLayers();
-  state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1 });
+  state.ndviLayer = L.imageOverlay(canvas.toDataURL('image/png'), getGeoBounds(), { opacity: 1, pane: 'ndviPane' });
   ndviOverlay.addLayer(state.ndviLayer);
   addContourToOverlay(ndviOverlay);
 }

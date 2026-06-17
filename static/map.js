@@ -38,8 +38,14 @@ proj4.defs('EPSG:32632', '+proj=utm +zone=32 +datum=WGS84 +units=m +no_defs');
 // ==========================================
 // MAP + BASEMAPS
 // ==========================================
-export const map = L.map('map', { center: [52.1, 5.5], zoom: 8, zoomControl: false });
+export const map = L.map('map', { center: [52.1, 5.5], zoom: 8, zoomControl: false, maxZoom: 30 });
 L.control.zoom({ position: 'topright' }).addTo(map);
+L.control.scale({ position: 'bottomleft', metric: true, imperial: false }).addTo(map);
+
+// Custom pane for the NDVI image overlay at z-index 399 — just below
+// the default overlayPane (z-index 400) so vectors render on top.
+map.createPane('ndviPane');
+map.getPane('ndviPane').style.zIndex = 399;
 
 const AHN_WMS_BASE = 'https://service.pdok.nl/rws/actueel-hoogtebestand-nederland/wms/v1_0';
 const BODEM_WMS_BASE = 'https://service.pdok.nl/tno/bro-bodemkaart/wms/v1_0';
@@ -47,11 +53,11 @@ const BODEM_WMS_BASE = 'https://service.pdok.nl/tno/bro-bodemkaart/wms/v1_0';
 export const basemaps = {
   'PDOK Luchtfoto': L.tileLayer(
     'https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg',
-    { attribution: 'PDOK', maxZoom: 19 }
+    { attribution: 'PDOK', maxZoom: 30, maxNativeZoom: 17 }
   ),
   'Esri Satelliet': L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    { attribution: 'Esri, Maxar, Earthstar Geographics', maxZoom: 19 }
+    { attribution: 'Esri, Maxar, Earthstar Geographics', maxZoom: 30, maxNativeZoom: 19 }
   ),
   'OpenStreetMap': L.tileLayer(
     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -59,15 +65,15 @@ export const basemaps = {
   ),
   'AHN DTM': L.tileLayer.wms(AHN_WMS_BASE, {
     layers: 'dtm_05m', format: 'image/png', transparent: false, version: '1.1.1',
-    attribution: 'PDOK / AHN', maxZoom: 19
+    attribution: 'PDOK / AHN', maxZoom: 30
   }),
   'AHN DSM': L.tileLayer.wms(AHN_WMS_BASE, {
     layers: 'dsm_05m', format: 'image/png', transparent: false, version: '1.1.1',
-    attribution: 'PDOK / AHN', maxZoom: 19
+    attribution: 'PDOK / AHN', maxZoom: 30
   }),
   'BRO Bodemkaart': L.tileLayer.wms(BODEM_WMS_BASE, {
     layers: 'soilarea', format: 'image/png', transparent: false, version: '1.3.0',
-    attribution: 'PDOK / BRO', maxZoom: 19
+    attribution: 'PDOK / BRO', maxZoom: 30
   }),
 };
 basemaps['Esri Satelliet'].addTo(map);
@@ -485,14 +491,22 @@ const LayerControlClass = L.Control.extend({
         var key = this.dataset.layer;
         var overlay = layerByKey[key];
         if (!overlay) return;
-        if (this.checked) map.addLayer(overlay); else map.removeLayer(overlay);
+        if (this.checked) {
+          map.addLayer(overlay);
+          // Restore correct stacking: grid above BRP, selection on top
+          if (map.hasLayer(gridOverlay)) {
+            gridOverlay.eachLayer(function (l) { if (typeof l.bringToFront === 'function') l.bringToFront(); });
+          }
+          if (map.hasLayer(selectionOverlay)) selectionOverlay.bringToFront();
+        } else {
+          map.removeLayer(overlay);
+        }
 
         // Keep "selectie" in sync when "percelen" is toggled
         if (key === 'percelen') {
           var selCb = panel.querySelector('input[data-layer="selectie"]');
           if (selCb && selCb.checked !== this.checked) {
             selCb.checked = this.checked;
-            // Re-add selectionOverlay so it stays on top of brpOverlay
             if (this.checked) {
               map.addLayer(selectionOverlay);
               selectionOverlay.bringToFront();
@@ -590,10 +604,10 @@ export function updateLayerVisibility() {
     ndviSection.style.display = state.ndviLayer ? '' : 'none';
   }
 
-  // BRP percelen: toon wanneer perceeldata geladen is
+  // BRP percelen: toon wanneer perceeldata geladen is OF er handmatige velden zijn
   var percelenLabel = document.getElementById('ulc-layer-percelen');
   if (percelenLabel) {
-    percelenLabel.style.display = state.brpGeoJSON ? '' : 'none';
+    percelenLabel.style.display = (state.brpGeoJSON || state.manualFields.length > 0) ? '' : 'none';
   }
 
   // Selectie: toon wanneer er percelen geselecteerd zijn

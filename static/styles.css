@@ -617,7 +617,7 @@ input[type="range"]::-moz-range-thumb {
 /* ---------- Dosage Editor (Step 5) ---------- */
 .dosage-row {
   display: grid;
-  grid-template-columns: 20px 1fr 95px 85px;
+  grid-template-columns: 20px 1fr auto 95px 85px;
   gap: 8px;
   align-items: center;
   padding: 7px 0;
@@ -1051,6 +1051,84 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .remove-parcel:hover { color: var(--error); }
+
+/* ---------- Drawing Tools (Step 2) ---------- */
+.draw-section {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.draw-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.draw-section-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+.draw-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--text-secondary);
+}
+.draw-toolbar {
+  display: flex;
+  gap: 6px;
+}
+.draw-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #e3f2fd;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: #1565c0;
+  font-weight: 500;
+}
+
+/* ---------- Cell Override Editor (Step 5) ---------- */
+.cell-override-section {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #fff8e1;
+  border-radius: var(--radius-sm);
+  border: 1px solid #ffe082;
+}
+.cell-override-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.cell-override-icon {
+  font-size: 14px;
+  line-height: 1;
+}
+.cell-override-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: #e65100;
+}
+.cell-override-info {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: rgba(255,255,255,0.6);
+  border-radius: 4px;
+}
+.cell-override-info .info-row {
+  font-size: 12px;
+  padding: 2px 0;
+}
 
 /* ---------- Hidden utility ---------- */
 .hidden { display: none !important; }
@@ -1602,4 +1680,46 @@ input[type="range"]::-moz-range-thumb {
 
 .vi-details span {
   white-space: nowrap;
+}
+
+/* ============================================
+   PDF Export — Capture optimisation
+   ============================================ */
+
+/* When the map is being captured for PDF, briefly disable
+   pointer events so tooltips/popups don't show */
+#map.pdf-capture {
+  pointer-events: none;
+}
+#map.pdf-capture .leaflet-control-zoom {
+  display: none;
+}
+#map.pdf-capture .selection-path {
+  display: none !important;
+}
+
+/* ============================================
+   Print styles — hide sidebar & chrome
+   ============================================ */
+@media print {
+  .sidebar,
+  #mobile-toggle,
+  #loading-overlay,
+  #toast,
+  .leaflet-control-zoom {
+    display: none !important;
+  }
+  .map-area {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+  #map {
+    width: 100% !important;
+    height: 100% !important;
+  }
+  .app {
+    display: block !important;
+  }
 }

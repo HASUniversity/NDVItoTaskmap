@@ -42,8 +42,6 @@
       labelVI:        'Vegetatie-index',
       labelStretch:   'Kleurschaal aanpassen aan data',
       labelResolution:'Resolutie:',
-      res512:         '512 (snel)',
-      res8192:        '8192 (nauwkeurig)',
       btnComputeNDVI: 'Bereken index',
 
       // ── Step 3 ───────────────────────────────
@@ -135,6 +133,7 @@
       loadingBands:         'Banden laden ({0}\xd7{1} px)\u2026',
       loadingReload:        'GeoTIFF herladen op {0} px\u2026',
       loadingVI:            '{0} berekenen...',
+      loadingRender:         'Kaartlaag renderen...',
       loadingGenerate:      'Taakkaart genereren...',
       loadingISOXML:        'ISOXML bouwen...',
 
@@ -169,6 +168,21 @@
       toastCSVDownload:     'CSV download gestart.',
       toastISOXMLDownload:  'ISOXML download gestart.',
       toastNdviTiffDownload:'NDVI GeoTIFF download gestart.',
+      toastPDFExport:       'PDF download gestart.',
+      toastPdfExportError:  'PDF export fout: {0}',
+      loadingPDF:           'PDF genereren...',
+      pdfTitle:             'Taakkaart',
+      pdfSubtitle:          'NDVI - Variabele Dosering',
+      pdfGenerated:         'Gegenereerd op',
+      pdfSource:            'Bronbestand',
+      pdfGrid:              'Gridgrootte',
+      pdfUnit:              'Eenheid',
+      pdfArea:              'Totale oppervlakte',
+      pdfLegend:            'Legenda - Dosering per klasse',
+      pdfRate:              'Dosering',
+      pdfNDVIRange:         'NDVI-bereik',
+      pdfCoordinateSystem:  'Coördinatensysteem',
+      pdfCellCount:         'Aantal cellen',
       toastParcelShpDownload:'Percelen Shapefile download gestart.',
       toastParcelGpkgDownload:'Percelen GeoPackage download gestart.',
       toastNdviTiffEmpty:   'Geen NDVI pixels binnen de selectie \u2014 niets te exporteren.',
@@ -187,6 +201,7 @@
       parcelHintLoading:    'BRP percelen laden...',
       parcelHintLoaded:     '{0} percelen geladen. Klik om te selecteren.',
       parcelHintFailed:     'BRP laden mislukt. Probeer opnieuw.',
+      parcelHintTimeout:    'BRP-server reageert niet (timeout). Percelen handmatig tekenen of later opnieuw proberen.',
 
       parcelCount1:         '{0} perceel',
       parcelCountN:         '{0} percelen',
@@ -199,6 +214,35 @@
 
       autoAngleHintNS:      'Noord-Zuid (klassiek fishnet)',
       autoAngleHintAngle:   'Rijrichting: {0}\xb0 (langste zijde perceel)',
+
+      // ── Drawing tools (Step 2) ──────────────
+      drawSectionTitle:     'Veld intekenen / Uploaden',
+      drawSectionDesc:      'Teken een veld op de kaart of upload een GeoJSON bestand. Werkt wereldwijd.',
+      drawPolygon:          'Teken veld',
+      drawRect:             'Teken rechthoek',
+      uploadGeoJSON:        'Upload GeoJSON',
+      drawClickFirst:       'Klik op de kaart om het eerste punt te plaatsen',
+      drawClickNext:        'Klik om volgende punt te plaatsen — dubbelklik of klik op eerste punt om te sluiten',
+      drawCancel:           'Annuleren',
+      drawFinish:           'Voltooi polygoon',
+      toastDrawStarted:     'Tekenmodus actief — klik op de kaart om punten te plaatsen',
+      toastDrawCancelled:   'Tekenen geannuleerd',
+      toastDrawComplete:    'Veld toegevoegd! ({0} punten)',
+      toastGeoJSONLoaded:   'GeoJSON geladen — {0} veld(en) toegevoegd',
+      toastGeoJSONError:    'Fout bij laden GeoJSON: {0}',
+
+      // ── Cell override (Step 5) ──────────────
+      cellOverrideTitle:    'Cel Overschrijven',
+      cellClass:            'Klasse:',
+      cellNDVI:             'NDVI:',
+      cellArea:             'Oppervlakte:',
+      cellDoseLabel:        'Aangepaste dosering',
+      cellApply:            'Toepassen',
+      cellClear:            'Herstel klasse',
+      toastCellOverride:    'Cel dosering overschreven naar {0} {1}',
+      toastCellCleared:     'Cel dosering hersteld naar klasse-waarde',
+      toastCellSelect:      'Klik op een grid-cel om de dosering aan te passen',
+      toastNoCell:         'Geen cel geselecteerd',
     },
 
     en: {
@@ -237,8 +281,6 @@
       labelVI:        'Vegetation index',
       labelStretch:   'Fit colour scale to data',
       labelResolution:'Resolution:',
-      res512:         '512 (fast)',
-      res8192:        '8192 (precise)',
       btnComputeNDVI: 'Compute index',
 
       // ── Step 3 ───────────────────────────────
@@ -328,6 +370,7 @@
       loadingBands:         'Loading bands ({0}\xd7{1} px)\u2026',
       loadingReload:        'Reloading GeoTIFF at {0} px\u2026',
       loadingVI:            'Computing {0}...',
+      loadingRender:         'Rendering map layer...',
       loadingGenerate:      'Generating task map...',
       loadingISOXML:        'Building ISOXML...',
 
@@ -362,6 +405,21 @@
       toastCSVDownload:     'CSV download started.',
       toastISOXMLDownload:  'ISOXML download started.',
       toastNdviTiffDownload:'NDVI GeoTIFF download started.',
+      toastPDFExport:       'PDF download started.',
+      toastPdfExportError:  'PDF export error: {0}',
+      loadingPDF:           'Generating PDF...',
+      pdfTitle:             'Task Map',
+      pdfSubtitle:          'NDVI - Variable Rate Application',
+      pdfGenerated:         'Generated on',
+      pdfSource:            'Source file',
+      pdfGrid:              'Grid size',
+      pdfUnit:              'Unit',
+      pdfArea:              'Total area',
+      pdfLegend:            'Legend - Rate per class',
+      pdfRate:              'Rate',
+      pdfNDVIRange:         'NDVI range',
+      pdfCoordinateSystem:  'Coordinate system',
+      pdfCellCount:         'Number of cells',
       toastParcelShpDownload:'Parcels Shapefile download started.',
       toastParcelGpkgDownload:'Parcels GeoPackage download started.',
       toastNdviTiffEmpty:   'No NDVI pixels inside selection \u2014 nothing to export.',
@@ -380,6 +438,7 @@
       parcelHintLoading:    'Loading BRP fields...',
       parcelHintLoaded:     '{0} fields loaded. Click to select.',
       parcelHintFailed:     'BRP loading failed. Please try again.',
+      parcelHintTimeout:    'BRP server not responding (timeout). Draw fields manually or try again later.',
 
       parcelCount1:         '{0} field',
       parcelCountN:         '{0} fields',
@@ -392,6 +451,35 @@
 
       autoAngleHintNS:      'North\u2013South (classic fishnet)',
       autoAngleHintAngle:   'Row direction: {0}\xb0 (longest field boundary)',
+
+      // ── Drawing tools (Step 2) ──────────────
+      drawSectionTitle:     'Draw / Upload Field',
+      drawSectionDesc:      'Draw a field on the map or upload a GeoJSON file. Works worldwide.',
+      drawPolygon:          'Draw field',
+      drawRect:             'Draw rectangle',
+      uploadGeoJSON:        'Upload GeoJSON',
+      drawClickFirst:       'Click on the map to place the first vertex',
+      drawClickNext:        'Click to place next vertex — double-click or click first point to close',
+      drawCancel:           'Cancel',
+      drawFinish:           'Finish polygon',
+      toastDrawStarted:     'Drawing mode active — click the map to place vertices',
+      toastDrawCancelled:   'Drawing cancelled',
+      toastDrawComplete:    'Field added! ({0} vertices)',
+      toastGeoJSONLoaded:   'GeoJSON loaded — {0} field(s) added',
+      toastGeoJSONError:    'Error loading GeoJSON: {0}',
+
+      // ── Cell override (Step 5) ──────────────
+      cellOverrideTitle:    'Override Cell',
+      cellClass:            'Class:',
+      cellNDVI:             'NDVI:',
+      cellArea:             'Area:',
+      cellDoseLabel:        'Custom rate',
+      cellApply:            'Apply',
+      cellClear:            'Restore class',
+      toastCellOverride:    'Cell rate overridden to {0} {1}',
+      toastCellCleared:     'Cell rate restored to class value',
+      toastCellSelect:      'Click a grid cell to adjust its rate',
+      toastNoCell:         'No cell selected',
     }
   };
 
