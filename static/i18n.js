@@ -43,6 +43,13 @@
       labelStretch:   'Kleurschaal aanpassen aan data',
       labelResolution:'Resolutie:',
       btnComputeNDVI: 'Bereken index',
+      wdviSoilLineTitle:  'WDVI Soil Line (a)',
+      wdviSoilLineDesc:   'De soil-line parameter a corrigeert voor bodemreflectie. Hogere a = meer bodemcorrectie.',
+      wdviPresetSand:     'Zand (1.0)',
+      wdviPresetClay:     'Klei (1.25)',
+      wdviPresetOrganic:  'Organisch (0.95)',
+      wdviPresetCustom:   'Aangepast',
+      wdviFormula:        'Formule: NIR − {0} × R',
 
       // ── Step 3 ───────────────────────────────
       labelSelected:  'Geselecteerd:',
@@ -282,6 +289,13 @@
       labelStretch:   'Fit colour scale to data',
       labelResolution:'Resolution:',
       btnComputeNDVI: 'Compute index',
+      wdviSoilLineTitle:  'WDVI Soil Line (a)',
+      wdviSoilLineDesc:   'The soil-line parameter a corrects for soil reflectance. Higher a = stronger soil correction.',
+      wdviPresetSand:     'Sand (1.0)',
+      wdviPresetClay:     'Clay (1.25)',
+      wdviPresetOrganic:  'Organic (0.95)',
+      wdviPresetCustom:   'Custom',
+      wdviFormula:        'Formula: NIR − {0} × R',
 
       // ── Step 3 ───────────────────────────────
       labelSelected:  'Selected:',

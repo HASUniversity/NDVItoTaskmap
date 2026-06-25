@@ -119,8 +119,10 @@ function computeVI(vi, nir, r, g, b, re) {
       return 1.0 / denom;
     }
     case 'WDVI': {
-      // Weighted Difference Vegetation Index: NIR − a×R  (soil line a=1.2)
-      return nir - 1.2 * r;
+      // Weighted Difference Vegetation Index: NIR − a×R
+      // The soil-line parameter 'a' is user-configurable via state.wdviSoilLineA
+      const a = (state.wdviSoilLineA != null) ? state.wdviSoilLineA : 1.0;
+      return nir - a * r;
     }
 
     // ── RGB-based indices ──

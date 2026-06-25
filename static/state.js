@@ -39,7 +39,7 @@ export const VEGETATION_INDICES = [
   { id: 'RDVI', label: 'RDVI', formula: '(NIR − R) / √(NIR + R)', desc: 'Renormalized Difference Vegetation Index — benadrukt gezonde vegetatie.', purpose: 'Gezonde vegetatie', range: '-1 tot 1', type: 'nir', clampRange: true, needsNIR: true, needsRed: true },
   { id: 'TDVI', label: 'TDVI', formula: '1.5 × ((NIR − R) / √(NIR² + R + 0.5))', desc: 'Transformed Difference Vegetation Index — voor stedelijke vegetatie.', purpose: 'Stedelijke vegetatie', range: '-1 tot 1', type: 'nir', clampRange: true, needsNIR: true, needsRed: true },
   { id: 'BAI', label: 'BAI', formula: '1 / ((0.1−R)² + (0.06−NIR)²)', desc: 'Burn Area Index — detecteert verbrande grond.', purpose: 'Branddetectie', range: '0 tot ∞', type: 'nir', clampRange: false, needsRed: true, needsNIR: true },
-  { id: 'WDVI', label: 'WDVI', formula: 'NIR − 1.2 × R', desc: 'Weighted Difference Vegetation Index — gecorrigeerd voor bodemreflectie via de soil-line parameter (a=1.2). Gerelateerd aan biomassa, net als NDVI.', purpose: 'Biomassa, bodemcorrectie', range: '−0.5 tot 1+', type: 'nir', clampRange: false, needsNIR: true, needsRed: true },
+  { id: 'WDVI', label: 'WDVI', formula: 'NIR − a×R', desc: 'Weighted Difference Vegetation Index — gecorrigeerd voor bodemreflectie via de soil-line parameter a. Bij a=1.0 wordt dit NIR−R. Gerelateerd aan biomassa, net als NDVI.', purpose: 'Biomassa, bodemcorrectie', range: '−0.5 tot 1+', type: 'nir', clampRange: false, needsNIR: true, needsRed: true },
 
   // ─── RGB-based indices (visible light only, no NIR needed) ───
   { id: 'NGRDI', label: 'NGRDI', formula: '(G − R) / (G + R)', desc: 'Normalized Green-Red Difference Index — eenvoudige RGB vegetatie-index.', purpose: 'RGB vegetatie', range: '-1 tot 1', type: 'rgb', clampRange: true, needsGreen: true, needsRed: true },
@@ -115,6 +115,10 @@ export const state = {
   bandNIR: null,
   bandRedEdge: null,
   selectedVI: 'NDVI',
+  /** Soil line parameter 'a' for WDVI (Weighted Difference Vegetation Index).
+   *  Default 1.0 — use NIR − a×R. Typical ranges:
+   *    Sand: 0.9–1.2, Clay: 1.1–1.4, Organic: 0.8–1.1 */
+  wdviSoilLineA: 1.0,
   classes: [],
   unit: 'kg/ha',
   currentStep: 1,

@@ -1,26 +1,28 @@
-# NDVItoTaskmap — Mirror
+# NDVItoTaskmap — Mirror & Sync Instructies
 
-> ⚠️ **Dit is een read-only mirror.** Wijzig nooit direct bestanden in deze map.
+Dit project wordt ontwikkeld in `d:\GIT\AZ_dilab-prod\showcases\NDVItoTaskmap`
+en gespiegeld naar `D:\GIT\NDVItoTaskmap`.
 
-Dit is een automatische mirror van `d:\GIT\AZ_dilab-prod\showcases\NDVItoTaskmap`.
+## Verplichte taken bij elke wijziging
 
-## Synchronisatie
+1. **README bijwerken** — Werk na elke functionele wijziging de `README.md` bij:
+   - Nieuwe features toevoegen aan de functielijst.
+   - Gewijzigde exportformaten of stappen in de workflow updaten.
+   - Datum, versie of links waar nodig actualiseren.
+   - **Zowel NL- als EN-sectie** consistent houden.
 
-Na elke wijziging in het bronproject wordt met Robocopy gesynchroniseerd:
+2. **CHANGELOG bijwerken** — Houd de `CHANGELOG.md` in de bron bij met een
+   beschrijving van wat er is gewijzigd, onder een `## [Unreleased]`-kop.
 
-```powershell
-robocopy "d:\GIT\AZ_dilab-prod\showcases\NDVItoTaskmap" "D:\GIT\NDVItoTaskmap" /E /COPY:DAT /R:2 /W:2 /NP /NDL /XO
-```
+3. **Synchoniseer naar de mirror** — Voer na het voltooien van wijzigingen in de bron dit
+   PowerShell-commando uit om de mirror synchroon te houden:
+   ```powershell
+   robocopy "d:\GIT\AZ_dilab-prod\showcases\NDVItoTaskmap" "D:\GIT\NDVItoTaskmap" /E /COPY:DAT /R:2 /W:2 /NP /NDL /XO
+   ```
+   > `/XO` (eXclude Older) zorgt dat alleen nieuwere bestanden van bron naar mirror worden gekopieerd.
 
-> `/XO` (eXclude Older) kopieert alleen nieuwere bestanden van bron naar mirror.
-
-## Bij wijzigingen in deze mirror
-
-Als je een wijziging nodig hebt:
-
-1. Pas de bestanden aan in `d:\GIT\AZ_dilab-prod\showcases\NDVItoTaskmap`
-2. Werk de `README.md` en `CHANGELOG.md` in de bron bij met wat er is veranderd
-3. Voer het Robocopy-commando hierboven uit om de mirror bij te werken
+4. **Mirror README & CHANGELOG bijwerken** — Als de README of CHANGELOG zijn gewijzigd,
+   werk ze dan ook bij in de mirror via bovenstaande sync (robocopy doet dit automatisch).
 
 ---
 

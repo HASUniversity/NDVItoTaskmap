@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### WDVI Soil Line parameter verbeterd
+- **WDVI soil line `a`** is nu aanpasbaar via een slider (0.50–1.80) in Stap 3 i.p.v. een hardcoded waarde van 1.2.
+- Standaardwaarde gewijzigd naar **1.0** (NIR − R) — de aanbevolen startwaarde voor DJI Mavic 3M data zonder eigen kalibratie.
+- **Grondtype-presets** toegevoegd: Zand (1.0), Klei (1.25) en Organisch (0.95) voor snelle bodemaanpassing.
+- Live voorbeeld van de formule `NIR − a×R` met de geselecteerde `a`-waarde.
+- Bij wijziging van de soil line wordt de WDVI-kaartlaag automatisch herberekend.
+- WDVI in de indexlijst bijgewerkt: formule getoond als `NIR − a×R` (dynamisch).
+- Nederlandse en Engelse vertalingen voor de nieuwe WDVI-bedieningselementen.
+
 ### Mirror & instructies
 - Project gespiegeld naar `D:\GIT\NDVItoTaskmap` met Robocopy-script.
 - `copilot-instructions.md` toegevoegd met verplichte stappen bij elke wijziging:

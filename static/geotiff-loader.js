@@ -230,6 +230,11 @@ export function updateVIInfo() {
     '<span>📏 ' + vi.range + '</span>' +
     '<span>📁 ' + typeLabel + '</span>';
   viInfo.style.display = '';
+  // If WDVI is selected, update the formula display in the soil-line section too
+  if (id === 'WDVI') {
+    const aVal = state.wdviSoilLineA != null ? state.wdviSoilLineA : 1.0;
+    updateWDVIFormulaDisplay(aVal);
+  }
 }
 
 // Populate once on load
@@ -242,9 +247,77 @@ if (viSelect) {
     state.selectedVI = viSelect.value;
     updateVIInfo();
     updateBandSelectorVisibility();
+    updateWDVISoilLineVisibility();
     showLegendInPanel();
   });
 }
+
+// ==========================================
+// WDVI SOIL LINE PARAMETER (a)
+// ==========================================
+
+const wdviSection     = document.querySelector('#wdvi-soil-line-section');
+const wdviSlider      = document.querySelector('#wdvi-soil-line-slider');
+const wdviValue       = document.querySelector('#wdvi-soil-line-value');
+const wdviFormulaDisp = document.querySelector('#wdvi-formula-display');
+
+/** Shows/hides the WDVI soil line section based on the selected VI. */
+export function updateWDVISoilLineVisibility() {
+  if (!wdviSection) return;
+  const isWDVI = (state.selectedVI === 'WDVI');
+  wdviSection.style.display = isWDVI ? '' : 'none';
+}
+
+/** Updates the WDVI formula display text with the current 'a' value. */
+function updateWDVIFormulaDisplay(aVal) {
+  if (!wdviFormulaDisp) return;
+  const lang = document.documentElement.lang || 'nl';
+  const template = lang === 'nl'
+    ? 'Formule: NIR − {0} × R'
+    : 'Formula: NIR − {0} × R';
+  wdviFormulaDisp.textContent = template.replace('{0}', aVal.toFixed(2));
+}
+
+/** Reads the slider value and updates state + UI. */
+function applyWDVISoilLine(value) {
+  const a = parseFloat(value);
+  if (isNaN(a)) return;
+  state.wdviSoilLineA = a;
+  if (wdviSlider) wdviSlider.value = a;
+  if (wdviValue) wdviValue.textContent = a.toFixed(2);
+  updateWDVIFormulaDisplay(a);
+}
+
+// Slider input (live preview)
+if (wdviSlider) {
+  wdviSlider.addEventListener('input', function () {
+    const a = parseFloat(wdviSlider.value);
+    if (wdviValue) wdviValue.textContent = a.toFixed(2);
+    updateWDVIFormulaDisplay(a);
+  });
+  wdviSlider.addEventListener('change', function () {
+    applyWDVISoilLine(wdviSlider.value);
+    // Auto-recompute after a short debounce so the user sees the updated overlay
+    if (state.tiff && state.tiffImage && state.selectedVI === 'WDVI') {
+      computeBtn.click();
+    }
+  });
+}
+
+// Preset buttons
+document.querySelectorAll('.wdvi-preset-btn').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    const val = parseFloat(btn.getAttribute('data-value'));
+    if (isNaN(val)) return;
+    applyWDVISoilLine(val);
+    if (state.tiff && state.tiffImage && state.selectedVI === 'WDVI') {
+      computeBtn.click();
+    }
+  });
+});
+
+// Initial visibility check
+updateWDVISoilLineVisibility();
 
 /**
  * Reads the GeoTIFF at a new target resolution, rebuilding `state.georaster`.

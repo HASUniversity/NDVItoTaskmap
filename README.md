@@ -12,7 +12,8 @@ Een browser-gebaseerde tool om variabele-dosering taakkaarten te genereren vanui
 
 * **GeoTIFF upload** — Ondersteuning voor WebODM/ODM multispectrale beelden, pre-berekende NDVI en DJI Terra RGB Plant Health exports.
 * **Automatische banddetectie** — Detecteert Red, Green, NIR en RedEdge via golflengte-metadata of ODM-conventie; handmatige override mogelijk.
-* **Meerdere vegetatie-indexen** — NDVI, GNDVI, NDRE, SAVI en OSAVI. Selecteer de index in de UI; de juiste banden worden automatisch geselecteerd.
+* **20+ vegetatie-indexen** — NDVI, GNDVI, NDRE, SAVI, WDVI, EVI, VARI en meer. Selecteer de index in de UI; de juiste banden worden automatisch geselecteerd.
+* **WDVI soil line parameter** — De bodemcorrectiefactor `a` van de Weighted Difference Vegetation Index is instelbaar via een slider (0.50–1.80) met presets voor zand-, klei- en organische bodems.
 * **Instelbare resolutie** — Slider van 512–8192 px bepaalt op welke resolutie het raster geladen wordt. Hogere waarden geven nauwkeurigere indexberekeningen.
 * **Parcel clipping** — NDVI-overlay en histogram worden automatisch geknipt naar geselecteerde percelen. Kleuren en schaal blijven consistent met het volledige raster.
 * **BRP perceelintegratie** — Laadt live Nederlandse perceelgrenzen via PDOK WFS; selecteer percelen door erop te klikken.
@@ -119,7 +120,7 @@ NDVItoTaskmap/
 ## Workflow
 
 1. **GeoTIFF laden** — Sleep een multispectrale `.tif` in de browser of klik om te uploaden.
-2. **Index & banden** — Kies een vegetatie-index (NDVI, GNDVI, NDRE, SAVI of OSAVI), stel de gewenste resolutie in en klik *Bereken*. Banden worden automatisch gedetecteerd.
+2. **Index & banden** — Kies een vegetatie-index (o.a. NDVI, WDVI, GNDVI, NDRE, SAVI, EVI), stel bij WDVI de **soil line parameter `a`** in op basis van het bodemtype, kies de gewenste resolutie en klik *Bereken*. Banden worden automatisch gedetecteerd.
 3. **Percelen selecteren** — Zoom in tot niveau 14+; BRP-percelen laden automatisch. Klik een perceel om te selecteren. De overlay en het histogram worden automatisch geknipt naar het geselecteerde perceel.
 4. **Taakkaart instellen** — Stel gridgrootte, eenheid, rijrichting en doseringsklassen in. Gebruik *auto-classificeer* voor gelijke verdeling over klassen.
 5. **Exporteren** — Download in het gewenste formaat voor tractor-terminal of FMIS.
@@ -152,7 +153,8 @@ A browser-based tool for generating variable-rate prescription task maps from mu
 
 * **GeoTIFF upload** — Supports WebODM/ODM multispectral, pre-calculated NDVI, and DJI Terra RGB Plant Health exports.
 * **Automatic band detection** — Detects Red, Green, NIR, and RedEdge via wavelength metadata or ODM convention; manual override available.
-* **Multiple vegetation indices** — NDVI, GNDVI, NDRE, SAVI, and OSAVI. Select the index in the UI; the required bands are auto-selected.
+* **20+ vegetation indices** — NDVI, GNDVI, NDRE, SAVI, WDVI, EVI, VARI and more. Select the index in the UI; the required bands are auto-selected.
+* **WDVI soil line parameter** — The soil correction factor `a` of the Weighted Difference Vegetation Index is adjustable via a slider (0.50–1.80) with presets for sand, clay and organic soils.
 * **Adjustable resolution** — Slider from 512–8192 px controls the raster loading resolution. Higher values give more accurate index calculations.
 * **Parcel clipping** — The index overlay and histogram are automatically clipped to selected parcels. Colour scale and legend remain consistent with the full raster.
 * **BRP parcel integration** — Loads live Dutch agricultural field boundaries via PDOK WFS; click to select parcels.

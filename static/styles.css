@@ -1683,6 +1683,37 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ============================================
+   WDVI Soil Line Parameter
+   ============================================ */
+#wdvi-soil-line-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-top: 8px;
+}
+#wdvi-soil-line-section .wdvi-preset-btn {
+  flex: 1;
+  min-width: 60px;
+  padding: 5px 8px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  background: var(--bg);
+  color: var(--text);
+  transition: background .15s, border-color .15s;
+}
+#wdvi-soil-line-section .wdvi-preset-btn:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+#wdvi-soil-line-section .wdvi-preset-btn:active {
+  background: var(--primary-dark, #388e3c);
+}
+
+/* ============================================
    PDF Export — Capture optimisation
    ============================================ */
 
