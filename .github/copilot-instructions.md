@@ -26,6 +26,12 @@ en gespiegeld naar `D:\GIT\NDVItoTaskmap`.
 
 ---
 
+## Controle vóór de taken hieronder
+
+Syntaxcheck eerst het bestand dat je wijzigde: `node --check "<bestand>.js"`. Geef node een
+Windows-pad (`D:/GIT/...`); een MSYS-pad als `/d/GIT/...` geeft *Cannot find module*. Faalt dat, stop
+en los het op vóór de sync-stap — de mirror krijgt anders een kapotte versie.
+
 # Karpathy-Inspired Copilot Guidelines
 
 Behavioural guidelines to reduce common LLM coding mistakes, derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on LLM coding pitfalls. Source: [multica-ai/andrej-karpathy-skills](https://github.com/multica-ai/andrej-karpathy-skills)
