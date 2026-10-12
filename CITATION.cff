@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "NDVI Taakkaart Generator"
+abstract: "Browser-based tool that generates variable-rate application task maps from drone NDVI imagery (GeoTIFF), with automatic band detection and Dutch parcel (BRP) integration."
+authors:
+  - family-names: Verschuren
+    given-names: Koen
+    orcid: "https://orcid.org/0009-0002-7395-0034"
+    affiliation: "HAS green academy"
+repository-code: "https://github.com/HASUniversity/NDVItoTaskmap"
+keywords:
+  - NDVI
+  - precision agriculture
+  - variable rate application
+  - task map
+  - remote sensing
+  - GeoTIFF
+license: MIT
+type: software

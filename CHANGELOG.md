@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Citeren
+- `CITATION.cff` toegevoegd met auteur (Koen Verschuren), ORCID `0009-0002-7395-0034`, affiliatie HAS green academy en licentie MIT, zodat GitHub de knop "Cite this repository" toont.
+
 ### WDVI Soil Line parameter verbeterd
 - **WDVI soil line `a`** is nu aanpasbaar via een slider (0.50–1.80) in Stap 3 i.p.v. een hardcoded waarde van 1.2.
 - Standaardwaarde gewijzigd naar **1.0** (NIR − R) — de aanbevolen startwaarde voor DJI Mavic 3M data zonder eigen kalibratie.
